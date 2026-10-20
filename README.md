@@ -76,3 +76,18 @@ GPL-3.0。原生引擎不链接任何第三方 hook 库（`llvm-nm -D` 只会看
 - `LoadPackageParam.modulePath` 在 api-82 里不存在 → 改用 `CodeSource` 定位模块 APK
 - R8 会把 `XposedEntry`/`NativeBridge` 剥光 → 需要 `proguard-rules.pro` keep
 - JDK 27 下 AGP 的 `JdkImageTransform` 必失败 → 用 JDK 21
+
+## v0.2.0 — 战斗功能扩展
+
+在倍速之外按 il2cpp 类名/方法名运行时挂钩（不依赖任何偏移，不引用原模块二进制）：
+
+| 功能 | 目标 | 做法 |
+|---|---|---|
+| 倍速 | `UnityEngine.Time.set_timeScale` | 实参乘系数 |
+| 无限部署费用 | `BattleController.SetCost(int,int)` | 两参覆写为 9999 |
+| 生命不减 | `BattleController.ModifyLifePoint(int,obj,int,bool)` | 负值钳到 0 |
+| 敌人停滞 | `BattleEnemy.MoveByRoute(float,bool*)` | 速度置 0 |
+| 强制胜利 | `BattleController.get_gameResult()` | 先跑原逻辑，返回 3 |
+
+未实现：秒杀（`BattleEntity.Init` 是 8 参混合结构，需要真机确认参义后才能安全改写，
+贸然改会 Crash；要的话给我一次战斗 logcat，我按实测签名补上）。

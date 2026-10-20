@@ -59,6 +59,10 @@ class _HomePageState extends State<HomePage> {
   bool _enabled = true;
   double _delaySec = 5;
   double _speed = 2.0;
+  bool _cost = false;
+  bool _life = false;
+  bool _freeze = false;
+  bool _win = false;
   List<GameEntry> _games = const [];
 
   @override
@@ -76,6 +80,10 @@ class _HomePageState extends State<HomePage> {
         _enabled = (cfg?['enabled'] as bool?) ?? true;
         _delaySec = (((cfg?['delayMs'] as int?) ?? 5000) / 1000).toDouble();
         _speed = (((cfg?['speedX100'] as int?) ?? 200) / 100).toDouble();
+        _cost = (cfg?['cost'] as bool?) ?? false;
+        _life = (cfg?['life'] as bool?) ?? false;
+        _freeze = (cfg?['freeze'] as bool?) ?? false;
+        _win = (cfg?['win'] as bool?) ?? false;
         _games = (raw ?? const [])
             .map((e) => GameEntry.fromMap(e as Map))
             .toList(growable: false);
@@ -93,6 +101,10 @@ class _HomePageState extends State<HomePage> {
       'enabled': _enabled,
       'delayMs': (_delaySec * 1000).round(),
       'speedX100': (_speed * 100).round(),
+      'cost': _cost,
+      'life': _life,
+      'freeze': _freeze,
+      'win': _win,
     });
   }
 
@@ -180,9 +192,36 @@ class _HomePageState extends State<HomePage> {
                   : null,
               onChangeEnd: (_) => _save(),
             ),
+            const Divider(height: 24),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('战斗功能', style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            _switchRow('无限部署费用', 'BattleController.SetCost 覆写为 9999',
+                _cost, (v) { setState(() => _cost = v); _save(); }),
+            _switchRow('生命不减', 'ModifyLifePoint 的扣血值钳到 0',
+                _life, (v) { setState(() => _life = v); _save(); }),
+            _switchRow('敌人停滞', 'BattleEnemy.MoveByRoute 速度置 0',
+                _freeze, (v) { setState(() => _freeze = v); _save(); }),
+            _switchRow('强制胜利', 'get_gameResult 返回三星结果',
+                _win, (v) { setState(() => _win = v); _save(); }),
+            const SizedBox(height: 8),
+            const Text('功能在战斗开始时按名称解析后挂钩；未进入战斗前无影响。',
+                style: TextStyle(color: Colors.white38, fontSize: 11)),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _switchRow(String title, String subtitle, bool value, ValueChanged<bool> onChanged) {
+    return SwitchListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      title: Text(title, style: const TextStyle(fontSize: 14)),
+      subtitle: Text(subtitle, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+      value: value,
+      onChanged: _enabled ? onChanged : null,
     );
   }
 

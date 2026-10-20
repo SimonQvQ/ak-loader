@@ -45,14 +45,22 @@ class XposedEntry : IXposedHookLoadPackage {
         val delayMs = prefs.getInt("delay_ms", 5000).coerceIn(0, 60_000)
         val speedX100 = prefs.getInt("speed_x100", 200).coerceIn(100, 1000)
 
+        // 功能掩码：bit0 倍速 / bit1 无限费用 / bit2 生命不减 / bit3 敌人停滞 / bit4 强制胜利
+        var mask = 0
+        if (speedX100 > 100) mask = mask or 1
+        if (prefs.getBoolean("f_cost", false)) mask = mask or (1 shl 1)
+        if (prefs.getBoolean("f_life", false)) mask = mask or (1 shl 2)
+        if (prefs.getBoolean("f_freeze", false)) mask = mask or (1 shl 3)
+        if (prefs.getBoolean("f_win", false)) mask = mask or (1 shl 4)
+
         Thread({
             try {
                 if (delayMs > 0) Thread.sleep(delayMs.toLong())
                 val ctx = currentApplication()
                 val lib = extractNative(ctx, moduleApk())
                 System.load(lib.absolutePath)
-                NativeBridge.start(speedX100)
-                log("引擎已注入 speed=x${speedX100 / 100.0}")
+                NativeBridge.start(mask, speedX100)
+                log("引擎已注入 mask=0x${Integer.toHexString(mask)} speed=x${speedX100 / 100.0}")
             } catch (t: Throwable) {
                 log("注入失败: $t")
             }

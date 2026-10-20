@@ -28,6 +28,10 @@ class MainActivity : FlutterActivity() {
                         "enabled" to prefs.getBoolean("enabled", true),
                         "delayMs" to prefs.getInt("delay_ms", 5000),
                         "speedX100" to prefs.getInt("speed_x100", 200),
+                        "cost" to prefs.getBoolean("f_cost", false),
+                        "life" to prefs.getBoolean("f_life", false),
+                        "freeze" to prefs.getBoolean("f_freeze", false),
+                        "win" to prefs.getBoolean("f_win", false),
                     )
                 )
                 "saveConfig" -> {
@@ -38,6 +42,10 @@ class MainActivity : FlutterActivity() {
                         .putBoolean("enabled", enabled)
                         .putInt("delay_ms", delay.coerceIn(0, 60_000))
                         .putInt("speed_x100", speed.coerceIn(100, 1000))
+                        .putBoolean("f_cost", call.argument<Boolean>("cost") ?: false)
+                        .putBoolean("f_life", call.argument<Boolean>("life") ?: false)
+                        .putBoolean("f_freeze", call.argument<Boolean>("freeze") ?: false)
+                        .putBoolean("f_win", call.argument<Boolean>("win") ?: false)
                         .apply()
                     result.success(true)
                 }
