@@ -91,3 +91,11 @@ GPL-3.0。原生引擎不链接任何第三方 hook 库（`llvm-nm -D` 只会看
 
 未实现：秒杀（`BattleEntity.Init` 是 8 参混合结构，需要真机确认参义后才能安全改写，
 贸然改会 Crash；要的话给我一次战斗 logcat，我按实测签名补上）。
+
+## v0.3.0 — 攻击/伤害倍率
+
+原版 mrfz 适配库里**没有**攻击力功能（只有 8 个导出 hook：Init/SetCost/ModifyLifePoint/MoveByRoute/StartGame/FinishGame/get_gameResult/set_timeScale）。本版新增的是我自己加的：
+
+`BattleEntity.Init` 返回后遍历该实例的字段，字段名含 `atk`/`attack`/`damage`/`dmg`
+且类型为 I4 / I8 / R4 的，直接乘倍率（UI 1.0×–20.0×）。
+`il2cpp_class_get_fields` + `il2cpp_field_get_offset` 全运行时解析，无硬编码偏移。

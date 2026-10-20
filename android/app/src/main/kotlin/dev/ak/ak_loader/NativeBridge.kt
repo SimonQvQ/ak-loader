@@ -16,5 +16,5 @@ object NativeBridge {
         }
     }
 
-    external fun start(mask: Int, speedX100: Int)
+    external fun start(mask: Int, speedX100: Int, atkX10: Int)
 }

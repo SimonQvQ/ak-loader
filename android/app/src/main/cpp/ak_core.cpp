@@ -69,6 +69,12 @@ using fn_domain_get_assemblies = const void* (*)(const void*, size_t*);
 using fn_assembly_get_image    = void* (*)(const void*);
 using fn_class_from_name       = void* (*)(const void*, const char*, const char*);
 using fn_method_from_name      = void* (*)(void*, const char*, int);
+using fn_class_get_fields      = void* (*)(void*, void**);
+using fn_object_get_class      = void* (*)(void*);
+using fn_field_get_name        = const char* (*)(void*);
+using fn_field_get_offset      = size_t (*)(void*);
+using fn_field_get_type        = void* (*)(void*);
+using fn_type_get_type         = int (*)(void*);
 
 struct Il2Cpp {
     fn_domain_get            domain_get            = nullptr;
@@ -76,10 +82,18 @@ struct Il2Cpp {
     fn_assembly_get_image    assembly_get_image    = nullptr;
     fn_class_from_name       class_from_name       = nullptr;
     fn_method_from_name      method_from_name      = nullptr;
+    fn_class_get_fields      class_get_fields      = nullptr;
+    fn_object_get_class      object_get_class      = nullptr;
+    fn_field_get_name        field_get_name        = nullptr;
+    fn_field_get_offset      field_get_offset      = nullptr;
+    fn_field_get_type        field_get_type        = nullptr;
+    fn_type_get_type         type_get_type         = nullptr;
 
     bool complete() const {
         return domain_get && domain_get_assemblies && assembly_get_image &&
-               class_from_name && method_from_name;
+               class_from_name && method_from_name &&
+               class_get_fields && object_get_class && field_get_name && field_get_offset &&
+               field_get_type && type_get_type;
     }
 };
 
@@ -96,6 +110,18 @@ bool resolve_api(void* handle) {
             dlsym(handle, "il2cpp_class_from_name"));
     g_api.method_from_name = reinterpret_cast<fn_method_from_name>(
             dlsym(handle, "il2cpp_class_get_method_from_name"));
+    g_api.class_get_fields = reinterpret_cast<fn_class_get_fields>(
+            dlsym(handle, "il2cpp_class_get_fields"));
+    g_api.object_get_class = reinterpret_cast<fn_object_get_class>(
+            dlsym(handle, "il2cpp_object_get_class"));
+    g_api.field_get_name = reinterpret_cast<fn_field_get_name>(
+            dlsym(handle, "il2cpp_field_get_name"));
+    g_api.field_get_offset = reinterpret_cast<fn_field_get_offset>(
+            dlsym(handle, "il2cpp_field_get_offset"));
+    g_api.field_get_type = reinterpret_cast<fn_field_get_type>(
+            dlsym(handle, "il2cpp_field_get_type"));
+    g_api.type_get_type = reinterpret_cast<fn_type_get_type>(
+            dlsym(handle, "il2cpp_type_get_type"));
     return g_api.complete();
 }
 
@@ -160,6 +186,8 @@ struct Config {
     bool life     = false;   // 生命不减
     bool freeze   = false;   // 敌人停滞
     bool win      = false;   // 强制结算胜利
+    bool atk      = false;   // 攻击/伤害字段倍率
+    float atkMul  = 1.0f;
     float scale   = 1.0f;
 };
 
@@ -170,6 +198,7 @@ constexpr int kCost   = 1 << 1;
 constexpr int kLife   = 1 << 2;
 constexpr int kFreeze = 1 << 3;
 constexpr int kWin    = 1 << 4;
+constexpr int kAtk    = 1 << 5;
 
 // --- 倍速：UnityEngine.Time.set_timeScale
 void (*g_orig_time_scale)(float) = nullptr;
@@ -203,6 +232,59 @@ int32_t hk_game_result(void* self) {
     return 3;                                           // 3 = 三星通关
 }
 
+// --- 攻击/伤害倍率：BattleEntity.Init 之后按字段名放大数值
+struct Vec2 { float x, y; };
+
+bool name_has(const char* n, const char* const* keys) {
+    for (size_t i = 0; keys[i]; ++i) {
+        const char* k = keys[i];
+        for (const char* p = n; *p; ++p) {
+            size_t j = 0;
+            while (k[j] && (p[j] == k[j] || p[j] == static_cast<char>(k[j] - 32))) ++j;
+            if (!k[j]) return true;
+        }
+    }
+    return false;
+}
+
+void scale_fields(void* obj) {
+    if (!obj) return;
+    static const char* const kKeys[] = {"atk", "attack", "damage", "dmg", nullptr};
+    void* klass = g_api.object_get_class(obj);
+    void* iter = nullptr;
+    void* f = nullptr;
+    int touched = 0;
+    while ((f = g_api.class_get_fields(klass, &iter))) {
+        const char* name = g_api.field_get_name(f);
+        if (!name || !name_has(name, kKeys)) continue;
+        int t = g_api.type_get_type(g_api.field_get_type(f));
+        size_t off = g_api.field_get_offset(f);
+        uint8_t* p = static_cast<uint8_t*>(obj) + off;
+        if (t == 0x08) {           // I4
+            auto* v = reinterpret_cast<int32_t*>(p);
+            *v = static_cast<int32_t>(*v * g_cfg.atkMul);
+            ++touched;
+        } else if (t == 0x0c) {    // R4
+            auto* v = reinterpret_cast<float*>(p);
+            *v *= g_cfg.atkMul;
+            ++touched;
+        } else if (t == 0x0a) {    // I8
+            auto* v = reinterpret_cast<int64_t*>(p);
+            *v = static_cast<int64_t>(*v * g_cfg.atkMul);
+            ++touched;
+        }
+    }
+    if (touched) LOGI("属性倍率 x%.2f 命中 %d 个字段", g_cfg.atkMul, touched);
+}
+
+// BattleEntity.Init(obj, obj, int, int, int, Vector2, float, obj)
+void (*g_orig_entity_init)(void*, void*, int32_t, int32_t, int32_t, Vec2, float, void*) = nullptr;
+void hk_entity_init(void* self, void* p1, int32_t a, int32_t b, int32_t c,
+                    Vec2 v, float f, void* p8) {
+    if (g_orig_entity_init) g_orig_entity_init(self, p1, a, b, c, v, f, p8);
+    if (g_cfg.atk && g_cfg.atkMul > 1.0f) scale_fields(self);
+}
+
 void apply_features() {
     if (g_cfg.speed) {
         void* k = wait_class("UnityEngine", "Time");
@@ -226,6 +308,11 @@ void apply_features() {
                              reinterpret_cast<void**>(&g_orig_game_result), "强制胜利");
         }
     }
+    if (g_cfg.atk) {
+        void* k = wait_class("", "BattleEntity");
+        if (k) patch_method(k, "Init", 8, reinterpret_cast<void*>(&hk_entity_init),
+                            reinterpret_cast<void**>(&g_orig_entity_init), "属性倍率");
+    }
     if (g_cfg.freeze) {
         void* k = wait_class("", "BattleEnemy");
         if (k) patch_method(k, "MoveByRoute", 2,
@@ -236,12 +323,15 @@ void apply_features() {
 
 // ---------------------------------------------------------------- JNI
 
-void native_start(JNIEnv*, jclass, jint mask, jint speedX100) {
+void native_start(JNIEnv*, jclass, jint mask, jint speedX100, jint atkX10) {
     g_cfg.speed  = mask & kSpeed;
     g_cfg.cost   = mask & kCost;
     g_cfg.life   = mask & kLife;
     g_cfg.freeze = mask & kFreeze;
     g_cfg.win    = mask & kWin;
+    g_cfg.atk    = mask & kAtk;
+    g_cfg.atkMul = atkX10 / 10.0f;
+    if (g_cfg.atkMul < 1.0f) g_cfg.atkMul = 1.0f;
     g_cfg.scale  = speedX100 / 100.0f;
     if (g_cfg.scale < 1.0f) g_cfg.scale = 1.0f;
 
@@ -260,7 +350,7 @@ void native_start(JNIEnv*, jclass, jint mask, jint speedX100) {
 }
 
 const JNINativeMethod kMethods[] = {
-        {"start", "(II)V", reinterpret_cast<void*>(native_start)},
+        {"start", "(III)V", reinterpret_cast<void*>(native_start)},
 };
 
 }  // namespace

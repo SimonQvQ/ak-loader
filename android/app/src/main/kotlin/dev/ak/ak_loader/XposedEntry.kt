@@ -52,6 +52,8 @@ class XposedEntry : IXposedHookLoadPackage {
         if (prefs.getBoolean("f_life", false)) mask = mask or (1 shl 2)
         if (prefs.getBoolean("f_freeze", false)) mask = mask or (1 shl 3)
         if (prefs.getBoolean("f_win", false)) mask = mask or (1 shl 4)
+        val atkX10 = prefs.getInt("atk_x10", 10).coerceIn(10, 200)
+        if (atkX10 > 10) mask = mask or (1 shl 5)
 
         Thread({
             try {
@@ -59,8 +61,8 @@ class XposedEntry : IXposedHookLoadPackage {
                 val ctx = currentApplication()
                 val lib = extractNative(ctx, moduleApk())
                 System.load(lib.absolutePath)
-                NativeBridge.start(mask, speedX100)
-                log("引擎已注入 mask=0x${Integer.toHexString(mask)} speed=x${speedX100 / 100.0}")
+                NativeBridge.start(mask, speedX100, atkX10)
+                log("引擎已注入 mask=0x${Integer.toHexString(mask)} speed=x${speedX100 / 100.0} atk=x${atkX10 / 10.0}")
             } catch (t: Throwable) {
                 log("注入失败: $t")
             }
