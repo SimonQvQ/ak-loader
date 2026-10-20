@@ -1,0 +1,29 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+*.iml
+
+# Gradle
+android/.gradle/
+android/local.properties
+android/app/.cxx/
+.gradle/
+
+# 产物（不入库，随 Release 发布）
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# 预编译 native 产物：由 scripts/build-native.sh 从源码生成
+android/app/src/main/jniLibs/
+
+# 编译期依赖（由 scripts/fetch-xposed-api.sh 下载）
+android/app/libs/
+
+# IDE
+.idea/
+.vscode/

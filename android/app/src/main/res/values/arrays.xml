@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="xposed_scope">
+        <item>com.hypergryph.arknights</item>
+        <item>com.hypergryph.arknights.bilibili</item>
+        <item>tw.arknights</item>
+    </string-array>
+</resources>
