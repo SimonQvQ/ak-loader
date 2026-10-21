@@ -27,6 +27,13 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // -Pabi=arm64-v8a 可裁出只有单一 ABI 的包（Waydroid/houdini 测试用）
+        val abiFilter = (project.findProperty("abi") as String?)
+            ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+        if (!abiFilter.isNullOrEmpty()) {
+            ndk { abiFilters += abiFilter }
+        }
     }
 
     packaging {
