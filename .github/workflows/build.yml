@@ -1,0 +1,90 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+  pull_request:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: NDK + build-tools
+        run: |
+          sdkmanager --install "ndk;27.1.12297006" "build-tools;35.0.0" "platforms;android-35" >/dev/null
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      - name: Xposed 编译期 API
+        run: bash scripts/fetch-xposed-api.sh
+
+      - name: 原生引擎（arm64 + x86_64）
+        run: bash scripts/build-native.sh
+
+      - name: Flutter release APK
+        run: |
+          flutter pub get
+          flutter build apk --release
+
+      - name: 生成 arm64-only 变体（Waydroid/houdini 用）
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_SDK_ROOT/build-tools/35.0.0"
+          cp build/app/outputs/flutter-apk/app-release.apk zoot-universal.apk
+
+          rm -rf arm64 && mkdir arm64
+          cd arm64
+          unzip -q ../zoot-universal.apk
+          rm -rf lib/x86_64 lib/x86 lib/armeabi-v7a META-INF
+          zip -qr ../zoot-arm64-unsigned.apk .
+          cd ..
+
+          keytool -genkeypair -keystore zoot.jks -storepass zoot123456 -keypass zoot123456 \
+            -alias zoot -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=zoot" >/dev/null 2>&1
+
+          "$BT/zipalign" -f -p 4 zoot-arm64-unsigned.apk zoot-arm64.apk
+          "$BT/apksigner" sign --ks zoot.jks --ks-pass pass:zoot123456 --key-pass pass:zoot123456 \
+            --out zoot-arm64-signed.apk zoot-arm64.apk
+          mv zoot-arm64-signed.apk zoot-arm64.apk
+          "$BT/apksigner" verify zoot-arm64.apk && echo "arm64 变体签名 OK"
+          ls -l zoot-*.apk
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: zoot-apk
+          path: |
+            zoot-universal.apk
+            zoot-arm64.apk
+          retention-days: 30
+
+      - name: tag 时发 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            zoot-universal.apk
+            zoot-arm64.apk
+          generate_release_notes: true

@@ -27,3 +27,4 @@ android/app/libs/
 # IDE
 .idea/
 .vscode/
+android/.kotlin/

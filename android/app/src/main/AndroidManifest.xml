@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        android:label="明日方舟启动器"
+        android:label="zoot"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false">
@@ -27,7 +27,7 @@
 
         <!-- LSPosed / Xposed 模块声明 -->
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="明日方舟专用载入器" />
+        <meta-data android:name="xposeddescription" android:value="zoot" />
         <meta-data android:name="xposedminversion" android:value="93" />
         <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
         <meta-data android:name="xposedsharedprefs" android:value="true" />

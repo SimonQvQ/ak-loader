@@ -1,5 +1,18 @@
 #include "hook.h"
 
+#if !defined(__aarch64__)
+
+// x86_64（以及其它架构）目前没有 inline hook 后端：
+// 在 houdini 翻译层里被翻译执行的是 arm64 代码，任何本进程写入都无意义，
+// 因此这里只提供空实现，让引擎能正常加载并把原因报给用户。
+#include <android/log.h>
+bool hook_install(InlineHook&, void*, void*) {
+    __android_log_print(ANDROID_LOG_WARN, "AKL", "该架构没有 hook 后端，跳过");
+    return false;
+}
+
+#else
+
 #include <android/log.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -79,3 +92,5 @@ bool hook_install(InlineHook& h, void* target, void* replace) {
     LOGI("hook 安装成功 target=%p replace=%p tramp=%p", target, replace, mem);
     return true;
 }
+
+#endif  // __aarch64__

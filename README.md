@@ -88,9 +88,18 @@ GPL-3.0。原生引擎不链接任何第三方 hook 库（`llvm-nm -D` 只会看
 | 生命不减 | `BattleController.ModifyLifePoint(int,obj,int,bool)` | 负值钳到 0 |
 | 敌人停滞 | `BattleEnemy.MoveByRoute(float,bool*)` | 速度置 0 |
 | 强制胜利 | `BattleController.get_gameResult()` | 先跑原逻辑，返回 3 |
+| 一键通关 | `BattleController.get_instance()` + `FinishGame(int,bool,obj)` | 后台线程每 2s 轮询，进战斗就 `il2cpp_runtime_invoke` 结算成 3 星 |
 
 未实现：秒杀（`BattleEntity.Init` 是 8 参混合结构，需要真机确认参义后才能安全改写，
 贸然改会 Crash；要的话给我一次战斗 logcat，我按实测签名补上）。
+
+## v0.4.0 — 一键通关 + 改名 zoot
+
+- **一键通关**：不依赖 `get_gameResult` 的被动覆盖，而是在后台线程里主动调用
+  `BattleController.get_instance()` 拿到战斗实例，再用 `il2cpp_runtime_invoke` 调
+  `FinishGame(3, true, null)`，进战斗即结算三星。日志关键字：`[一键通关] 已请求结算（result=3）`；
+  若目标方法的签名不是 `(int, bool, obj)`，会打 `FinishGame 抛异常，参数签名可能不是 ...` 而不是静默失败。
+- 应用名 / 图标 / 模块描述统一改为 **zoot**（自适应图标，深蓝底白色 Z）。
 
 ## v0.3.0 — 攻击/伤害倍率
 

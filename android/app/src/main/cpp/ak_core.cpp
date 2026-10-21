@@ -11,8 +11,11 @@
 #include <jni.h>
 #include <link.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include <cstdint>
+#include <cstdio>
+#include <fcntl.h>
 #include <cstring>
 
 #include "hook.h"
@@ -76,6 +79,9 @@ using fn_field_get_offset      = size_t (*)(void*);
 using fn_field_get_type        = void* (*)(void*);
 using fn_type_get_type         = int (*)(void*);
 
+using fn_runtime_invoke = void* (*)(void* method, void* obj, void** params, void** exc);
+using fn_thread_attach  = void* (*)(void* domain);
+
 struct Il2Cpp {
     fn_domain_get            domain_get            = nullptr;
     fn_domain_get_assemblies domain_get_assemblies = nullptr;
@@ -88,12 +94,14 @@ struct Il2Cpp {
     fn_field_get_offset      field_get_offset      = nullptr;
     fn_field_get_type        field_get_type        = nullptr;
     fn_type_get_type         type_get_type         = nullptr;
+    fn_runtime_invoke        runtime_invoke        = nullptr;
+    fn_thread_attach         thread_attach         = nullptr;
 
     bool complete() const {
         return domain_get && domain_get_assemblies && assembly_get_image &&
                class_from_name && method_from_name &&
                class_get_fields && object_get_class && field_get_name && field_get_offset &&
-               field_get_type && type_get_type;
+               field_get_type && type_get_type && runtime_invoke;
     }
 };
 
@@ -122,6 +130,10 @@ bool resolve_api(void* handle) {
             dlsym(handle, "il2cpp_field_get_type"));
     g_api.type_get_type = reinterpret_cast<fn_type_get_type>(
             dlsym(handle, "il2cpp_type_get_type"));
+    g_api.runtime_invoke = reinterpret_cast<fn_runtime_invoke>(
+            dlsym(handle, "il2cpp_runtime_invoke"));
+    g_api.thread_attach = reinterpret_cast<fn_thread_attach>(
+            dlsym(handle, "il2cpp_thread_attach"));
     return g_api.complete();
 }
 
@@ -186,6 +198,7 @@ struct Config {
     bool life     = false;   // 生命不减
     bool freeze   = false;   // 敌人停滞
     bool win      = false;   // 强制结算胜利
+    bool instant  = false;   // 一键通关：主动调用 FinishGame 结算
     bool atk      = false;   // 攻击/伤害字段倍率
     float atkMul  = 1.0f;
     float scale   = 1.0f;
@@ -199,6 +212,7 @@ constexpr int kLife   = 1 << 2;
 constexpr int kFreeze = 1 << 3;
 constexpr int kWin    = 1 << 4;
 constexpr int kAtk    = 1 << 5;
+constexpr int kInstant = 1 << 6;
 
 // --- 倍速：UnityEngine.Time.set_timeScale
 void (*g_orig_time_scale)(float) = nullptr;
@@ -321,6 +335,97 @@ void apply_features() {
     }
 }
 
+#if defined(__aarch64__)
+constexpr unsigned kHostMachine = 0xB7;   // EM_AARCH64
+#elif defined(__x86_64__)
+constexpr unsigned kHostMachine = 0x3E;   // EM_X86_64
+#else
+constexpr unsigned kHostMachine = 0;
+#endif
+
+const char* machine_name(unsigned m) {
+    switch (m) {
+        case 0xB7: return "arm64";
+        case 0x3E: return "x86_64";
+        case 0x28: return "arm";
+        case 0x03: return "x86";
+        default:   return "unknown";
+    }
+}
+
+// 读 libil2cpp.so 的 ELF e_machine，用来判断它是不是被翻译执行的另一套架构
+unsigned elf_machine_of_il2cpp() {
+    FILE* f = std::fopen("/proc/self/maps", "r");
+    if (!f) return 0;
+    char line[512];
+    unsigned machine = 0;
+    while (std::fgets(line, sizeof line, f)) {
+        if (!std::strstr(line, "libil2cpp.so")) continue;
+        if (!std::strstr(line, "r--p")) continue;   // 只读段对应文件偏移 0
+        char* path = std::strchr(line, '/');
+        if (!path) continue;
+        char clean[400];
+        std::snprintf(clean, sizeof clean, "%s", path);
+        clean[std::strcspn(clean, "\n")] = 0;
+        int fd = ::open(clean, O_RDONLY);
+        if (fd >= 0) {
+            unsigned char h[20] = {};
+            if (::read(fd, h, sizeof h) == static_cast<ssize_t>(sizeof h))
+                machine = static_cast<unsigned>(h[18]) | (static_cast<unsigned>(h[19]) << 8);
+            ::close(fd);
+        }
+        break;
+    }
+    std::fclose(f);
+    return machine;
+}
+
+
+// ---------------------------------------------------------------- 一键通关
+
+// 主动调用 BattleController.get_instance() 拿到战斗实例，再用
+// FinishGame(3, true, null) 让这一局立刻结算成三星胜利。
+void* instant_win_thread(void*) {
+#if defined(__aarch64__)
+    if (g_api.thread_attach && g_api.domain_get)
+        g_api.thread_attach(g_api.domain_get());
+
+    void* klass = nullptr;
+    for (int i = 0; i < 120 && !klass; ++i) {
+        klass = find_class("", "BattleController");
+        if (!klass) usleep(500 * 1000);
+    }
+    if (!klass) { LOGE("[一键通关] 找不到 BattleController"); return nullptr; }
+
+    void* get_instance = g_api.method_from_name(klass, "get_instance", 0);
+    void* finish       = g_api.method_from_name(klass, "FinishGame", 3);
+    LOGI("[一键通关] get_instance=%p FinishGame=%p", get_instance, finish);
+    if (!get_instance || !finish) { LOGE("[一键通关] 方法解析失败"); return nullptr; }
+
+    for (int i = 0; i < 600; ++i) {
+        void* exc = nullptr;
+        void* ctrl = g_api.runtime_invoke(get_instance, nullptr, nullptr, &exc);
+        if (!exc && ctrl) {
+            int32_t result = 3;      // 3 星
+            bool win = true;
+            void* arg2 = nullptr;    // 第三个参数按引用类型传 null
+            void* params[3] = {&result, &win, &arg2};
+            void* exc2 = nullptr;
+            g_api.runtime_invoke(finish, ctrl, params, &exc2);
+            if (exc2) {
+                LOGE("[一键通关] FinishGame 抛异常，参数签名可能不是 (int,bool,obj)");
+                return nullptr;
+            }
+            LOGI("[一键通关] 已请求结算（result=3）");
+            return nullptr;
+        }
+        usleep(2000 * 1000);   // 2s 轮询一次，等玩家进入战斗
+    }
+    LOGE("[一键通关] 等了 20 分钟也没进战斗");
+#endif
+    return nullptr;
+}
+
 // ---------------------------------------------------------------- JNI
 
 void native_start(JNIEnv*, jclass, jint mask, jint speedX100, jint atkX10) {
@@ -330,6 +435,7 @@ void native_start(JNIEnv*, jclass, jint mask, jint speedX100, jint atkX10) {
     g_cfg.freeze = mask & kFreeze;
     g_cfg.win    = mask & kWin;
     g_cfg.atk    = mask & kAtk;
+    g_cfg.instant = mask & kInstant;
     g_cfg.atkMul = atkX10 / 10.0f;
     if (g_cfg.atkMul < 1.0f) g_cfg.atkMul = 1.0f;
     g_cfg.scale  = speedX100 / 100.0f;
@@ -337,16 +443,49 @@ void native_start(JNIEnv*, jclass, jint mask, jint speedX100, jint atkX10) {
 
     LOGI("引擎启动 mask=0x%x scale=x%.2f", mask, g_cfg.scale);
 
+#if !defined(__aarch64__)
+    // 这个 so 只能在 arm64 上做 inline hook。
+    // 在 x86_64（Waydroid 容器 / 模拟器）里，游戏是 arm64 被 houdini 翻译执行的，
+    // 改内存里的 arm64 指令对翻译后的代码毫无影响，直接停用比乱 hook 安全。
+    LOGE("本进程是 x86_64：运行的是翻译层里的 arm64 游戏，原生 hook 无法生效，功能停用。");
+    LOGE("请把模块装在 arm64 真机上；此构建存在的意义只是让引擎能加载并给出原因。");
+    return;
+#endif
+
     void* handle = nullptr;
     for (int i = 0; i < 120 && !handle; ++i) {
         handle = dlopen("libil2cpp.so", RTLD_NOW);
         if (!handle) usleep(500 * 1000);
     }
-    if (!handle) { LOGE("libil2cpp.so 未加载"); return; }
+    if (!handle) {
+        const unsigned m = elf_machine_of_il2cpp();
+        if (m == 0xB7 && kHostMachine != 0xB7)
+            LOGE("进程里只有 arm64 的 libil2cpp.so（%s 进程），说明游戏在翻译层上运行，"
+                 "本引擎无法 hook；请在 arm64 真机上使用", machine_name(kHostMachine));
+        else
+            LOGE("libil2cpp.so 未加载（等了 60s）");
+        return;
+    }
     if (!find_module("libil2cpp.so", g_il2cpp)) { LOGE("取不到代码段"); return; }
+
+    const unsigned game_machine = elf_machine_of_il2cpp();
+    LOGI("架构检查：进程=%s il2cpp=%s", machine_name(kHostMachine), machine_name(game_machine));
+    if (game_machine && game_machine != kHostMachine) {
+        LOGE("il2cpp 是 %s、进程是 %s —— 这是翻译层（houdini）环境，原生 hook 不可能生效。",
+             machine_name(game_machine), machine_name(kHostMachine));
+        LOGE("引擎已加载但功能停用：请把模块装在 arm64 真机上使用。");
+        return;
+    }
     if (!resolve_api(handle)) { LOGE("il2cpp 导出符号不全"); return; }
 
     apply_features();
+
+    if (g_cfg.instant) {
+        pthread_t t;
+        pthread_create(&t, nullptr, instant_win_thread, nullptr);
+        pthread_detach(t);
+        LOGI("一键通关已启动（进战斗后自动结算）");
+    }
 }
 
 const JNINativeMethod kMethods[] = {

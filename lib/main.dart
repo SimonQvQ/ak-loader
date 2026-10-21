@@ -11,7 +11,7 @@ class AkLoaderApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '明日方舟启动器',
+      title: 'zoot',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorSchemeSeed: const Color(0xFF2E5BE0),
@@ -63,6 +63,7 @@ class _HomePageState extends State<HomePage> {
   bool _life = false;
   bool _freeze = false;
   bool _win = false;
+  bool _instant = false;
   double _atk = 1.0;
   List<GameEntry> _games = const [];
 
@@ -85,6 +86,7 @@ class _HomePageState extends State<HomePage> {
         _life = (cfg?['life'] as bool?) ?? false;
         _freeze = (cfg?['freeze'] as bool?) ?? false;
         _win = (cfg?['win'] as bool?) ?? false;
+        _instant = (cfg?['instant'] as bool?) ?? false;
         _atk = (((cfg?['atkX10'] as int?) ?? 10) / 10).toDouble();
         _games = (raw ?? const [])
             .map((e) => GameEntry.fromMap(e as Map))
@@ -107,6 +109,7 @@ class _HomePageState extends State<HomePage> {
       'life': _life,
       'freeze': _freeze,
       'win': _win,
+      'instant': _instant,
       'atkX10': (_atk * 10).round(),
     });
   }
@@ -131,7 +134,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('明日方舟 启动器')),
+      appBar: AppBar(title: const Text('zoot')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -206,6 +209,8 @@ class _HomePageState extends State<HomePage> {
                 _life, (v) { setState(() => _life = v); _save(); }),
             _switchRow('敌人停滞', 'BattleEnemy.MoveByRoute 速度置 0',
                 _freeze, (v) { setState(() => _freeze = v); _save(); }),
+            _switchRow('一键通关', '开战后自动调用 BattleController.FinishGame(3,true) 结算胜利',
+                _instant, (v) { setState(() => _instant = v); _save(); }),
             _switchRow('强制胜利', 'get_gameResult 返回三星结果',
                 _win, (v) { setState(() => _win = v); _save(); }),
             _sliderRow(

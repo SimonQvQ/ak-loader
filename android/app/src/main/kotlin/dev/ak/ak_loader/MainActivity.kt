@@ -47,6 +47,7 @@ class MainActivity : FlutterActivity() {
                         .putBoolean("f_life", call.argument<Boolean>("life") ?: false)
                         .putBoolean("f_freeze", call.argument<Boolean>("freeze") ?: false)
                         .putBoolean("f_win", call.argument<Boolean>("win") ?: false)
+                        .putBoolean("f_instant", call.argument<Boolean>("instant") ?: false)
                         .putInt("atk_x10", (call.argument<Int>("atkX10") ?: 10).coerceIn(10, 200))
                         .apply()
                     result.success(true)
