@@ -55,6 +55,9 @@ jobs:
         run: |
           set -euo pipefail
           cp build/app/outputs/flutter-apk/app-release.apk zoot-universal.apk
+          # 清掉其他 ABI 的预编译 .so，确保打出来只有 arm64-v8a
+          rm -rf android/app/src/main/jniLibs/x86_64 android/app/src/main/jniLibs/x86 \
+                 android/app/src/main/jniLibs/armeabi-v7a
           flutter build apk --release --target-platform android-arm64 -Pabi=arm64-v8a
           cp build/app/outputs/flutter-apk/app-release.apk zoot-arm64.apk
           BT="$ANDROID_SDK_ROOT/build-tools/35.0.0"
