@@ -1,4 +1,33 @@
-# 在 Waydroid 里装 LSPosed + 本模块（实测记录）
+# Waydroid 适配与验证记录
+
+## 当前状态（2026-10-21）
+
+目标是在 Waydroid x86_64 + Houdini 下运行 arm64 引擎。**当前尚未验证战斗功能生效。**
+
+- Actions [#7](https://github.com/SimonQvQ/ak-loader/actions/runs/39619266417) 已成功；
+  CI 日志确认 `zoot-arm64.apk` 只声明 `arm64-v8a`，签名检查通过。
+- 新的加载路线：创建以游戏 ClassLoader 为父级的 `PathClassLoader`，
+  单独加载 `NativeBridge`，由该类调用 `System.load` 并调用自己的 JNI 方法。
+  子加载器保留强引用，避免 JNI 返回后原生库被提前卸载。
+- 依据：AOSP [libnativeloader](https://android.googlesource.com/platform/system/core/%2B/b5d1d1926924555dffa17dc70e69a9a0fd1b5807/libnativeloader/native_loader.cpp)
+  按调用类的 ClassLoader 选择命名空间，并从父命名空间继承 NativeBridge 属性。
+  这支持尝试该路线，不能证明本机 Houdini 的兼容性或 hook 有效性。
+- 新增 `scripts/verify-apk.py`：CI 对实际 ZIP 成员及 ELF 架构进行断言，
+  纯 arm64 包混入 x86_64 库会直接失败；同时检查 `resources.arsc` 不压缩及 4 字节对齐。
+- 本次本地 Kotlin、arm64/x86_64 原生编译通过；ADB 监听套接字被会话沙箱拒绝
+  （`Operation not permitted`），未能安装新版或在游戏中验证。
+
+下一次实测需确认三层结果：
+
+1. 安装包和 LSPosed 作用域正确（包含游戏包）。不同构建的 debug 签名可能不同；
+   若覆盖安装报签名冲突，不应自动卸载并丢失配置。
+2. 日志出现 `游戏命名空间`、`akl_core 已加载`、`架构检查`，无加载失败。
+3. 进入战斗后出现对应功能的 `已挂钩` 日志，且实际游戏行为发生预期变化。
+
+`引擎调用完成` 只表示 JNI 调用返回。x86_64 回退库仍只是诊断，不能作为功能成功的证据。
+
+以下为旧加载路线的历史实测。此前“只能真机”的结论超出了证据：
+`EM_AARCH64 instead of EM_X86_64` 证明那次调用走了宿主链接器，不能排除正确桥接命名空间的路线。
 
 环境：Waydroid（x86_64 容器）+ Magisk Delta 26.3 + houdini 14.0.0 + Android 13 (API 33)。
 
@@ -59,9 +88,7 @@ LSPosed-Bridge: Crash unexpectedly: UnsatisfiedLinkError:
   No implementation found for void com.xg.gamebox.NativeBridge.loadCommonAndRun(...)
 ```
 
-结论：**原版在这个容器里也加载不了原生库**。这不是我们实现的问题，是 x86_64 进程不能
-`dlopen` arm64 so（houdini 只翻译 APK 里声明的 arm64 库，不接管运行期任意路径的 arm64 so）。
-所以这是平台边界，换任何模块都一样。
+这次实测中，原版的这条加载路线未能加载 arm64 库；不能据此断言所有 NativeBridge 加载路线都不可行。
 
 ## 四、x86_64 适配：能加载、会明确报原因、不再崩
 
@@ -97,8 +124,8 @@ I/LSPosed-Bridge: [AKL] 模块 APK = /data/app/~~.../dev.ak.ak_loader-.../base.a
 dlopen failed: ".../libakl_core.so" is for EM_AARCH64 (183) instead of EM_X86_64 (62)
 ```
 
-x86_64 版引擎即使加载成功，也 hook 不到被翻译执行的 arm64 `libil2cpp.so`。
-所以**原生 hook 必须在真机 arm64 上测**，Waydroid 只能验证注入链路和 UI。
+x86_64 版当前没有 arm64 hook 后端，加载后会主动退出。
+Waydroid 的 arm64 引擎桥接路线仍需另行实测，见文首。
 
 ## 六、真机测试步骤
 
@@ -108,3 +135,30 @@ x86_64 版引擎即使加载成功，也 hook 不到被翻译执行的 arm64 `li
    `[AKL] 引擎已注入 mask=0x.. speed=x2.0 atk=x1.0`。
 4. 若报 `定位不到模块 APK`，把日志发我——说明该 Xposed 实现既不暴露 codeSource、
    maps 里也没有 APK 路径，需要再加一条回退。
+
+## 结论：Waydroid 无法承载 arm64 原生 LSPosed 模块（2026-10-21 实测）
+
+证据链（`/data/adb/lspd/log/verbose_*.log`，游戏进程 pid 10127）：
+
+```
+I/LSPosed-Bridge] Loading legacy module dev.ak.ak_loader from /data/app/.../base.apk
+I/LSPosed-Bridge]   Loading class dev.ak.ak_loader.XposedEntry
+I/LSPosed-Bridge] [AKL] 进入 com.hypergryph.arknights
+I/LSPosed-Bridge] [AKL] nativeLibraryDir 里的 so 加载失败（dlopen failed:
+    ".../lib/arm64/libakl_core.so" is for EM_AARCH64 (183) instead of EM_X86_64 (62)）
+I/LSPosed-Bridge] [AKL] arm64 so 加载失败（... 同上），回退 x86_64
+```
+
+说明：
+
+1. LSPosed 注入链路本身是好的：模块类被加载、`handleLoadPackage` 执行、日志打到游戏进程。
+2. 但明日方舟在 Waydroid 里是 **x86_64 进程**（arm64 的 libil2cpp.so 由 houdini64 翻译执行，见
+   `/proc/<pid>/maps` 里 `lib/arm64/libil2cpp.so`），所以 `System.load()` 走的是 **x86_64 bionic linker**，
+   它按 ELF machine 校验，直接拒绝 EM_AARCH64 的 .so。
+3. houdini 的 arm64 加载器只服务“被翻译的 arm64 代码”自己的 dlopen，宿主 x86_64 进程借不到它。
+   单独验证：arm64 ELF 可执行文件在本环境能跑，`dlopen("/data/local/tmp/libakl_core.so")` 返回 OK
+   （`dlsym JNI_OnLoad = 0x1acddb20`）——即“arm64 so 本身没问题，是宿主进程位数不对”。
+4. 唯一可能让 arm64 模块生效的方式是：被 hook 的目标进程本身是 arm64 进程（真机 / arm64 容器），
+   此时 linker 是 arm64、houdini 不参与。Waydroid(x86_64) 无解。
+
+**因此：功能验证必须在 arm64 真机（Android 8+ + LSPosed 1.9.x）上做；Waydroid 只能验到此为止。**
