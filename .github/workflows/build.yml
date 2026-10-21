@@ -51,27 +51,16 @@ jobs:
           flutter pub get
           flutter build apk --release
 
-      - name: 生成 arm64-only 变体（Waydroid/houdini 用）
+      - name: arm64-only 变体（Waydroid/houdini 用）
         run: |
           set -euo pipefail
-          BT="$ANDROID_SDK_ROOT/build-tools/35.0.0"
           cp build/app/outputs/flutter-apk/app-release.apk zoot-universal.apk
-
-          rm -rf arm64 && mkdir arm64
-          cd arm64
-          unzip -q ../zoot-universal.apk
-          rm -rf lib/x86_64 lib/x86 lib/armeabi-v7a META-INF
-          zip -qr ../zoot-arm64-unsigned.apk .
-          cd ..
-
-          keytool -genkeypair -keystore zoot.jks -storepass zoot123456 -keypass zoot123456 \
-            -alias zoot -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=zoot" >/dev/null 2>&1
-
-          "$BT/zipalign" -f -p 4 zoot-arm64-unsigned.apk zoot-arm64.apk
-          "$BT/apksigner" sign --ks zoot.jks --ks-pass pass:zoot123456 --key-pass pass:zoot123456 \
-            --out zoot-arm64-signed.apk zoot-arm64.apk
-          mv zoot-arm64-signed.apk zoot-arm64.apk
-          "$BT/apksigner" verify zoot-arm64.apk && echo "arm64 变体签名 OK"
+          flutter build apk --release --target-platform android-arm64
+          cp build/app/outputs/flutter-apk/app-release.apk zoot-arm64.apk
+          BT="$ANDROID_SDK_ROOT/build-tools/35.0.0"
+          "$BT/apksigner" verify zoot-universal.apk && echo "universal 签名 OK"
+          "$BT/apksigner" verify zoot-arm64.apk && echo "arm64 签名 OK"
+          "$BT/aapt2" dump badging zoot-arm64.apk | grep -E "native-code|application-label:"
           ls -l zoot-*.apk
 
       - name: 上传产物
