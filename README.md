@@ -6,7 +6,8 @@
 Waydroid 适配状态（v0.5.0 实验版）：x86_64 原生控制端通过游戏原生命名空间加载
 arm64 guest，经 NativeBridge 跳板调用探针和功能入口。已在 Houdini 14 实测探针执行成功；
 延迟启动后可附加 il2cpp 线程、找到目标类，但倍速 hook 因不支持目标序言而拒绝安装。
-战斗功能尚未验证，x64 实验包默认只运行探针。
+YW-3 演习中费用、生命、停滞、强制胜利和一键通关均未生效，
+详见 [战斗测试记录](docs/waydroid-battle-test-2026-10-22.md)。x64 实验包默认只运行探针。
 当前进度与验收步骤见 [docs/waydroid.md](docs/waydroid.md)。
 
 ## 结构
