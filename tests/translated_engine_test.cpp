@@ -133,6 +133,14 @@ int main(int argc, char** argv) {
     {
         fake = {};
         akl::TranslatedEngine engine;
+        assert(engine.start(api(), nullptr, loader(), nullptr, path.c_str(), 1, 200, 10, true).code == akl::kProbePassed);
+        assert(fake.probes == 1 && fake.runs == 0);
+        assert(start(engine, path.c_str()).code == akl::kStarted);
+        assert(fake.runs == 1);
+    }
+    {
+        fake = {};
+        akl::TranslatedEngine engine;
         std::vector<std::thread> threads;
         for (int i = 0; i < 8; ++i)
             threads.emplace_back([&] { assert(start(engine, path.c_str()).code == akl::kStarted); });

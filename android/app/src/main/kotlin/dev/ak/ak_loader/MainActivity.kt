@@ -16,7 +16,13 @@ class MainActivity : FlutterActivity() {
         Triple("tw.arknights", "明日方舟 · 台服", "台服"),
     )
 
-    private val prefs: SharedPreferences by lazy { getSharedPreferences("akl", MODE_PRIVATE) }
+    @Suppress("DEPRECATION")
+    private val prefs: SharedPreferences by lazy {
+        // LSPosed 1.9.x only shares preferences opened with this mode.
+        // Outside an active module environment Android rejects it.
+        try { getSharedPreferences("akl", MODE_WORLD_READABLE) }
+        catch (_: SecurityException) { getSharedPreferences("akl", MODE_PRIVATE) }
+    }
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)

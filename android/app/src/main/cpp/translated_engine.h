@@ -26,7 +26,7 @@ class TranslatedEngine {
 public:
     BridgeResult start(const BridgeApi&, JNIEnv*, jobject game_loader,
                        jclass bridge_class, const char* guest_path,
-                       jint mask, jint speed, jint attack);
+                       jint mask, jint speed, jint attack, bool probe_only = false);
 private:
     std::mutex mutex_;
     void* guest_handle_ = nullptr;

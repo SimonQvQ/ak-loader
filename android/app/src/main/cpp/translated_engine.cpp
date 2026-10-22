@@ -33,7 +33,7 @@ bool BridgeApi::complete() const {
 
 BridgeResult TranslatedEngine::start(const BridgeApi& api, JNIEnv* env,
         jobject game_loader, jclass bridge_class, const char* path,
-        jint mask, jint speed, jint attack) {
+        jint mask, jint speed, jint attack, bool probe_only) {
     std::lock_guard<std::mutex> lock(mutex_);
     // Even a failed engine call can have installed some hooks. Never run it twice.
     if (invoked_) return last_;
@@ -63,6 +63,7 @@ BridgeResult TranslatedEngine::start(const BridgeApi& api, JNIEnv* env,
     // Only the host-callable trampoline is invoked, with the declared JNI signature.
     if (reinterpret_cast<Probe>(probe)(env, bridge_class) != kGuestProbe)
         return {kProbeFailed, "guest-probe", "Guest probe returned an unexpected value"};
+    if (probe_only) return {kProbePassed, "guest-probe", "arm64 probe passed; feature engine was not started"};
     void* run = api.trampoline(guest_handle_, kRunName, "IIII", 4);
     if (!run) return {kEntryUnavailable, "guest-entry", bridge_error(api)};
     invoked_ = true;

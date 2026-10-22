@@ -6,6 +6,7 @@ constexpr int32_t kGuestProbe = 0x414b4c31;
 // Zero means at least one hook was installed; pending is not a battle result.
 constexpr int kStarted = 0;
 constexpr int kPending = 1;
+constexpr int kProbePassed = 2;
 constexpr int kWrongArchitecture = -10;
 constexpr int kIl2cppUnavailable = -11;
 constexpr int kCodeUnavailable = -12;

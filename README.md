@@ -4,8 +4,9 @@
 也没有任何一处代码来自其它模块——从 Flutter 界面、LSPosed 注入到 arm64 行内 hook 全部新写。
 
 Waydroid 适配状态（v0.5.0 实验版）：x86_64 原生控制端通过游戏原生命名空间加载
-arm64 guest，经 NativeBridge 跳板调用探针和功能入口。尚待 Houdini 下安装与战斗实测；
-编译及模拟接口测试通过不代表功能验证通过。
+arm64 guest，经 NativeBridge 跳板调用探针和功能入口。已在 Houdini 14 实测探针执行成功；
+延迟启动后可附加 il2cpp 线程、找到目标类，但倍速 hook 因不支持目标序言而拒绝安装。
+战斗功能尚未验证，x64 实验包默认只运行探针。
 当前进度与验收步骤见 [docs/waydroid.md](docs/waydroid.md)。
 
 ## 结构

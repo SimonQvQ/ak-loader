@@ -11,3 +11,15 @@ trap 'rm -rf "$test_dir"' EXIT
     tests/translated_engine_test.cpp android/app/src/main/cpp/translated_engine.cpp \
     -o "$test_dir/translated-engine-test"
 "$test_dir/translated-engine-test" "$test_dir"
+cat > "$test_dir/export-fixture.cpp" <<'CPP'
+extern "C" {
+int zoot_fixture_add(int value) { return value + 7; }
+int zoot_fixture_data = 123;
+}
+CPP
+"${CXX:-c++}" -shared -fPIC "$test_dir/export-fixture.cpp" -o "$test_dir/libzoot-symbol-fixture.so"
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
+    -fno-omit-frame-pointer -Iandroid/app/src/main/cpp \
+    tests/loaded_export_test.cpp android/app/src/main/cpp/loaded_export.cpp \
+    -ldl -o "$test_dir/loaded-export-test"
+"$test_dir/loaded-export-test" "$test_dir/libzoot-symbol-fixture.so"

@@ -69,6 +69,7 @@ class XposedEntry : IXposedHookLoadPackage {
         if (flag("f_instant", false)) mask = mask or (1 shl 6)
         val atkX10 = num("atk_x10", 10, 10, 200)
         if (atkX10 > 10) mask = mask or (1 shl 5)
+        log("配置 delay=${delayMs}ms mask=0x${mask.toString(16)} speed=$speedX100 attack=$atkX10")
 
         Thread({
             try {
@@ -100,6 +101,7 @@ class XposedEntry : IXposedHookLoadPackage {
         NativeBridge.loadHost(host.absolutePath)
         val status = NativeBridge.startTranslated(guest.absolutePath, ctx.classLoader, mask, speed, attack)
         when (status) {
+            2 -> log("x86_64 → arm64 探针通过；本次未启动功能引擎")
             0 -> log("x86_64 桥接引擎返回：至少一个 hook 已安装，战斗效果待确认")
             1 -> log("x86_64 桥接已进入 arm64 引擎，异步功能仍在等待验证")
             else -> log("x86_64 桥接启动失败 status=$status，查看 AKL-X64 / AKL 日志定位阶段")

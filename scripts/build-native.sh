@@ -14,7 +14,7 @@ build() {  # $1=abi  $2=target-triple
     mkdir -p "$out"
     local sources=()
     if [[ "$abi" == x86_64 ]]; then
-        sources=(android/app/src/main/cpp/waydroid_loader.cpp android/app/src/main/cpp/translated_engine.cpp)
+        sources=(android/app/src/main/cpp/waydroid_loader.cpp android/app/src/main/cpp/translated_engine.cpp android/app/src/main/cpp/loaded_export.cpp)
     else
         sources=(android/app/src/main/cpp/ak_core.cpp android/app/src/main/cpp/hook.cpp)
     fi

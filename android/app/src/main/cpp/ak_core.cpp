@@ -464,15 +464,18 @@ int start_engine(jint mask, jint speedX100, jint atkX10) {
         return akl::kWrongArchitecture;
     }
     if (!resolve_api(handle)) { LOGE("il2cpp 导出符号不全"); return akl::kApiUnavailable; }
+    LOGI("il2cpp 导出已解析，等待 domain");
     void* domain = nullptr;
     for (int i = 0; i < 120 && !domain; ++i) {
         domain = g_api.domain_get();
         if (!domain) usleep(500 * 1000);
     }
+    LOGI("il2cpp domain=%p，准备附加当前线程", domain);
     if (!domain || !g_api.thread_attach || !g_api.thread_attach(domain)) {
         LOGE("无法附加到 il2cpp 线程");
         return akl::kThreadUnavailable;
     }
+    LOGI("il2cpp 线程附加成功，开始解析功能目标");
 
     const int installed = apply_features();
     LOGI("功能安装结果：成功安装 %d 个 hook；战斗效果仍需验证", installed);
