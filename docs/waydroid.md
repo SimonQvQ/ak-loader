@@ -1,35 +1,22 @@
 # Waydroid 适配与验证记录
 
-## 当前状态（2026-10-22）
+## 当前状态（2026-10-22，v0.5.0 实验版）
 
-目标是在 Waydroid x86_64 + Houdini 下运行 arm64 引擎。**当前尚未验证战斗功能生效。**
+已重写 x86_64 控制端：从游戏原生命名空间加载 arm64 guest，经 NativeBridge 跳板
+调用探针和功能入口。专用包名为 `zoot-waydroid-x64.apk`，安装 ABI 为 x86_64；
+arm64 执行端放在 APK 资产中。实现、状态码和构建方式见 [x86_64.md](x86_64.md)。
 
-- Actions [#7](https://github.com/SimonQvQ/ak-loader/actions/runs/39619266417) 已成功；
-  CI 日志确认 `zoot-arm64.apk` 只声明 `arm64-v8a`，签名检查通过。
-- 新的加载路线：创建以游戏 ClassLoader 为父级的 `PathClassLoader`，
-  单独加载 `NativeBridge`，由该类调用 `System.load` 并调用自己的 JNI 方法。
-  子加载器保留强引用，避免 JNI 返回后原生库被提前卸载。
-- 依据：AOSP [libnativeloader](https://android.googlesource.com/platform/system/core/%2B/b5d1d1926924555dffa17dc70e69a9a0fd1b5807/libnativeloader/native_loader.cpp)
-  按调用类的 ClassLoader 选择命名空间，并从父命名空间继承 NativeBridge 属性。
-  这支持尝试该路线，不能证明本机 Houdini 的兼容性或 hook 有效性。
-- 新增 `scripts/verify-apk.py`：CI 对实际 ZIP 成员及 ELF 架构进行断言，
-  纯 arm64 包混入 x86_64 库会直接失败；同时检查 `resources.arsc` 不压缩及 4 字节对齐。
-- 本次本地 Kotlin、arm64/x86_64 原生编译通过；ADB 监听套接字被会话沙箱拒绝
-  （`Operation not permitted`），未能安装新版或在游戏中验证。
-- 新版尚未上传：GitHub 连接的 Git tree 写入返回 `403 Resource not accessible by integration`，
-  本机命令行也无法连接 GitHub。已发布的 v0.4.0 APK 使用旧加载路线。
+host / guest 的交叉编译、Kotlin 编译、模拟平台接口回归检查已通过。
+模拟检查覆盖错误分支、探针协议、参数传递及并发重复启动保护，不等同于 Houdini 实测。
+本会话的 ADB 套接字被沙箱拒绝，尚未验证实际桥接、hook 和战斗效果。
+GitHub 写入连接此前返回 403，因此尚未触发新版 CI 或上传新版 APK。
 
-下一次实测需确认三层结果：
+Actions [#7](https://github.com/SimonQvQ/ak-loader/actions/runs/39619266417) 和 Release v0.4.0
+只证明旧版安装包构建成功。它们不包含新 x86_64 控制端。
 
-1. 安装包和 LSPosed 作用域正确（包含游戏包）。不同构建的 debug 签名可能不同；
-   若覆盖安装报签名冲突，不应自动卸载并丢失配置。
-2. 日志出现 `游戏命名空间`、`akl_core 已加载`、`架构检查`，无加载失败。
-3. 进入战斗后出现对应功能的 `已挂钩` 日志，且实际游戏行为发生预期变化。
-
-`引擎调用完成` 只表示 JNI 调用返回。x86_64 回退库仍只是诊断，不能作为功能成功的证据。
-
-以下为旧加载路线的历史实测。此前“只能真机”的结论超出了证据：
-`EM_AARCH64 instead of EM_X86_64` 证明那次调用走了宿主链接器，不能排除正确桥接命名空间的路线。
+以下是旧加载路线的历史实测。`EM_AARCH64 instead of EM_X86_64` 证明那次调用走了
+宿主链接器；独立 arm64 测试进程的 dlopen 成功也不能证明游戏进程里的 JNI 或 hook 成功。
+目前不能据此宣称所有 Waydroid 路线都不可行，也不能宣称新路线已生效。
 
 环境：Waydroid（x86_64 容器）+ Magisk Delta 26.3 + houdini 14.0.0 + Android 13 (API 33)。
 

@@ -12,9 +12,14 @@ build() {  # $1=abi  $2=target-triple
     [ -x "$cxx" ] || { echo "找不到 $cxx，请设置 ANDROID_NDK_ROOT" >&2; return 1; }
     local out="android/app/src/main/jniLibs/$abi"
     mkdir -p "$out"
-    "$cxx" -shared -O2 -fPIC -fvisibility=hidden -std=c++17 -Wall \
-        android/app/src/main/cpp/ak_core.cpp \
-        android/app/src/main/cpp/hook.cpp \
+    local sources=()
+    if [[ "$abi" == x86_64 ]]; then
+        sources=(android/app/src/main/cpp/waydroid_loader.cpp android/app/src/main/cpp/translated_engine.cpp)
+    else
+        sources=(android/app/src/main/cpp/ak_core.cpp android/app/src/main/cpp/hook.cpp)
+    fi
+    "$cxx" -shared -O2 -fPIC -fvisibility=hidden -std=c++17 -Wall -Wextra \
+        "${sources[@]}" \
         -static-libstdc++ -llog -ldl \
         -o "$out/libakl_core.so"
     echo "已生成: $out/libakl_core.so"
@@ -23,3 +28,9 @@ build() {  # $1=abi  $2=target-triple
 
 build arm64-v8a aarch64-linux-android26
 build x86_64    x86_64-linux-android26
+
+# Asset carrier keeps PackageManager's Waydroid ABI x86_64 while shipping the
+# arm64 execution side separately. This generated file is never committed.
+mkdir -p android/app/src/main/assets/akl
+cp android/app/src/main/jniLibs/arm64-v8a/libakl_core.so \
+   android/app/src/main/assets/akl/libakl_guest.so

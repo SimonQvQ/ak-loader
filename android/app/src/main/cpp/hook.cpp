@@ -2,14 +2,7 @@
 
 #if !defined(__aarch64__)
 
-// x86_64（以及其它架构）目前没有 inline hook 后端：
-// 这里只提供空实现。Houdini 下应尝试加载 arm64 引擎，
-// 而不是把 x86_64 诊断库的加载成功当作功能成功。
-#include <android/log.h>
-bool hook_install(InlineHook&, void*, void*) {
-    __android_log_print(ANDROID_LOG_WARN, "AKL", "该架构没有 hook 后端，跳过");
-    return false;
-}
+#error "hook.cpp is the arm64 backend; x86_64 uses waydroid_loader.cpp and translated_engine.cpp"
 
 #else
 

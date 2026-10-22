@@ -2,6 +2,7 @@ package dev.ak.ak_loader
 
 import android.content.Context
 import android.os.Build
+import android.system.Os
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
@@ -24,6 +25,7 @@ class XposedEntry : IXposedHookLoadPackage {
         private const val MODULE_PKG = "dev.ak.ak_loader"
         private const val LIB_ARM64 = "lib/arm64-v8a/libakl_core.so"
         private const val LIB_X64 = "lib/x86_64/libakl_core.so"
+        private const val GUEST_ASSET = "assets/akl/libakl_guest.so"
         private const val BRIDGE_CLASS = "dev.ak.ak_loader.NativeBridge"
         // JNI 返回后仍保留加载器，避免原生 hook 还在使用时库被卸载。
         private var engineClassLoader: ClassLoader? = null
@@ -37,6 +39,7 @@ class XposedEntry : IXposedHookLoadPackage {
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName !in GAMES) return
+        if (lpparam.processName != lpparam.packageName) return
         if (!lpparam.isFirstApplication) return
         log("进入 ${lpparam.packageName}")
 
@@ -72,22 +75,35 @@ class XposedEntry : IXposedHookLoadPackage {
                 if (delayMs > 0) Thread.sleep(delayMs.toLong())
                 val ctx = currentApplication()
                 val apk = moduleApk(ctx)
-                val lib = moduleNativeLibDir(apk) ?: extractNative(ctx, apk, false)
-                try {
-                    startInGameNamespace(ctx, apk, lib, mask, speedX100, atkX10)
-                    log("arm64 引擎调用完成；是否找到 il2cpp / 安装 hook 请看 AKL 原生日志")
-                } catch (e: UnsatisfiedLinkError) {
-                    log("游戏命名空间加载 arm64 失败（${e.message}）")
-                    val hasX64 = ZipFile(apk).use { it.getEntry(LIB_X64) != null }
-                    if (!hasX64) throw e
-                    val alt = extractNative(ctx, apk, true)
-                    NativeBridge.loadAndStart(alt.absolutePath, mask, speedX100, atkX10)
-                    log("已回退 x86_64 诊断引擎，战斗功能未启用")
+                val machine = Os.uname().machine
+                if (android.os.Process.is64Bit() && machine in setOf("x86_64", "amd64")) {
+                    startOnX64(ctx, apk, mask, speedX100, atkX10)
+                    return@Thread
                 }
+                val lib = moduleNativeLibDir(apk) ?: extractNative(ctx, apk, false)
+                startInGameNamespace(ctx, apk, lib, mask, speedX100, atkX10)
+                log("arm64 引擎调用完成；是否找到 il2cpp / 安装 hook 请看 AKL 原生日志")
             } catch (t: Throwable) {
                 log("注入失败: $t")
             }
         }, "akl-loader").start()
+    }
+
+    private fun startOnX64(ctx: Context, apk: String, mask: Int, speed: Int, attack: Int) {
+        ZipFile(apk).use { zip ->
+            check(zip.getEntry(LIB_X64) != null && zip.getEntry(GUEST_ASSET) != null) {
+                "Waydroid 需要新版 zoot-waydroid-x64.apk 或 universal 包（含 x86_64 加载器与 arm64 guest）"
+            }
+        }
+        val host = extractNative(ctx, apk, true)
+        val guest = extractEntry(ctx, apk, GUEST_ASSET, "libakl_guest.so")
+        NativeBridge.loadHost(host.absolutePath)
+        val status = NativeBridge.startTranslated(guest.absolutePath, ctx.classLoader, mask, speed, attack)
+        when (status) {
+            0 -> log("x86_64 桥接引擎返回：至少一个 hook 已安装，战斗效果待确认")
+            1 -> log("x86_64 桥接已进入 arm64 引擎，异步功能仍在等待验证")
+            else -> log("x86_64 桥接启动失败 status=$status，查看 AKL-X64 / AKL 日志定位阶段")
+        }
     }
 
     /**
@@ -196,10 +212,14 @@ class XposedEntry : IXposedHookLoadPackage {
 
     /** 从模块 APK 里取出 arm64 的 so，落到目标进程可写的 code_cache */
     private fun extractNative(ctx: Context, modulePath: String?, forceX64: Boolean): File {
-        val dir = File(ctx.codeCacheDir, "akl").apply { mkdirs() }
-        val name = if (forceX64) "libakl_core_x64.so" else "libakl_core.so"
-        val out = File(dir, name)
         val entry = pickLibEntry(modulePath, forceX64)
+        return extractEntry(ctx, requireNotNull(modulePath), entry,
+            if (forceX64) "libakl_core_x64.so" else "libakl_core.so")
+    }
+
+    private fun extractEntry(ctx: Context, modulePath: String, entry: String, name: String): File {
+        val dir = File(ctx.codeCacheDir, "akl").apply { mkdirs() }
+        val out = File(dir, name)
         ZipFile(modulePath).use { zip ->
             val e = zip.getEntry(entry) ?: throw IllegalStateException("APK 里没有 $entry")
             zip.getInputStream(e).use { input ->

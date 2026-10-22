@@ -19,6 +19,11 @@
 #include <cstring>
 
 #include "hook.h"
+#include "engine_status.h"
+
+#if !defined(__aarch64__)
+#error "ak_core.cpp is the arm64 guest; build waydroid_loader.cpp for x86_64"
+#endif
 
 #define TAG "AKL"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
@@ -222,7 +227,7 @@ void hk_set_time_scale(float v) {
 
 // --- 无限费用：BattleController.SetCost(int, int)
 void (*g_orig_set_cost)(void*, int32_t, int32_t) = nullptr;
-void hk_set_cost(void* self, int32_t a, int32_t b) {
+void hk_set_cost(void* self, int32_t, int32_t) {
     if (g_orig_set_cost) g_orig_set_cost(self, 9999, 9999);
 }
 
@@ -235,7 +240,7 @@ void hk_modify_life(void* self, int32_t type, void* src, int32_t value, bool sho
 
 // --- 敌人停滞：BattleEnemy.MoveByRoute(float, bool*)
 void (*g_orig_move_by_route)(void*, float, void*) = nullptr;
-void hk_move_by_route(void* self, float speed, void* flag) {
+void hk_move_by_route(void* self, float, void* flag) {
     if (g_orig_move_by_route) g_orig_move_by_route(self, 0.0f, flag);
 }
 
@@ -299,10 +304,11 @@ void hk_entity_init(void* self, void* p1, int32_t a, int32_t b, int32_t c,
     if (g_cfg.atk && g_cfg.atkMul > 1.0f) scale_fields(self);
 }
 
-void apply_features() {
+int apply_features() {
+    int installed = 0;
     if (g_cfg.speed) {
         void* k = wait_class("UnityEngine", "Time");
-        if (k) patch_method(k, "set_timeScale", 1,
+        if (k) installed += patch_method(k, "set_timeScale", 1,
                             reinterpret_cast<void*>(&hk_set_time_scale),
                             reinterpret_cast<void**>(&g_orig_time_scale), "倍速");
     }
@@ -310,38 +316,33 @@ void apply_features() {
         void* k = wait_class("", "BattleController");
         if (k) {
             if (g_cfg.cost)
-                patch_method(k, "SetCost", 2, reinterpret_cast<void*>(&hk_set_cost),
+                installed += patch_method(k, "SetCost", 2, reinterpret_cast<void*>(&hk_set_cost),
                              reinterpret_cast<void**>(&g_orig_set_cost), "无限费用");
             if (g_cfg.life)
-                patch_method(k, "ModifyLifePoint", 4,
+                installed += patch_method(k, "ModifyLifePoint", 4,
                              reinterpret_cast<void*>(&hk_modify_life),
                              reinterpret_cast<void**>(&g_orig_modify_life), "生命不减");
             if (g_cfg.win)
-                patch_method(k, "get_gameResult", 0,
+                installed += patch_method(k, "get_gameResult", 0,
                              reinterpret_cast<void*>(&hk_game_result),
                              reinterpret_cast<void**>(&g_orig_game_result), "强制胜利");
         }
     }
     if (g_cfg.atk) {
         void* k = wait_class("", "BattleEntity");
-        if (k) patch_method(k, "Init", 8, reinterpret_cast<void*>(&hk_entity_init),
+        if (k) installed += patch_method(k, "Init", 8, reinterpret_cast<void*>(&hk_entity_init),
                             reinterpret_cast<void**>(&g_orig_entity_init), "属性倍率");
     }
     if (g_cfg.freeze) {
         void* k = wait_class("", "BattleEnemy");
-        if (k) patch_method(k, "MoveByRoute", 2,
+        if (k) installed += patch_method(k, "MoveByRoute", 2,
                             reinterpret_cast<void*>(&hk_move_by_route),
                             reinterpret_cast<void**>(&g_orig_move_by_route), "敌人停滞");
     }
+    return installed;
 }
 
-#if defined(__aarch64__)
 constexpr unsigned kHostMachine = 0xB7;   // EM_AARCH64
-#elif defined(__x86_64__)
-constexpr unsigned kHostMachine = 0x3E;   // EM_X86_64
-#else
-constexpr unsigned kHostMachine = 0;
-#endif
 
 const char* machine_name(unsigned m) {
     switch (m) {
@@ -428,7 +429,7 @@ void* instant_win_thread(void*) {
 
 // ---------------------------------------------------------------- JNI
 
-void native_start(JNIEnv*, jclass, jint mask, jint speedX100, jint atkX10) {
+int start_engine(jint mask, jint speedX100, jint atkX10) {
     g_cfg.speed  = mask & kSpeed;
     g_cfg.cost   = mask & kCost;
     g_cfg.life   = mask & kLife;
@@ -443,47 +444,56 @@ void native_start(JNIEnv*, jclass, jint mask, jint speedX100, jint atkX10) {
 
     LOGI("引擎启动 mask=0x%x scale=x%.2f", mask, g_cfg.scale);
 
-#if !defined(__aarch64__)
-    // x86_64 构建没有 arm64 hook 后端；这不排除用 NativeBridge 加载 arm64 构建。
-    LOGE("当前是非 arm64 诊断引擎：未实现该架构的 hook 后端，战斗功能停用。");
-    LOGE("Waydroid 需验证游戏命名空间中的 arm64 引擎加载路线。");
-    return;
-#endif
-
     void* handle = nullptr;
     for (int i = 0; i < 120 && !handle; ++i) {
         handle = dlopen("libil2cpp.so", RTLD_NOW);
         if (!handle) usleep(500 * 1000);
     }
     if (!handle) {
-        const unsigned m = elf_machine_of_il2cpp();
-        if (m == 0xB7 && kHostMachine != 0xB7)
-            LOGE("进程里只有 arm64 的 libil2cpp.so（%s 进程），说明游戏在翻译层上运行，"
-                 "本引擎无法 hook；请在 arm64 真机上使用", machine_name(kHostMachine));
-        else
-            LOGE("libil2cpp.so 未加载（等了 60s）");
-        return;
+        const char* error = dlerror();
+        LOGE("guest 无法加载 libil2cpp.so（等了 60s）: %s", error ? error : "unknown");
+        return akl::kIl2cppUnavailable;
     }
-    if (!find_module("libil2cpp.so", g_il2cpp)) { LOGE("取不到代码段"); return; }
+    if (!find_module("libil2cpp.so", g_il2cpp)) { LOGE("取不到代码段"); return akl::kCodeUnavailable; }
 
     const unsigned game_machine = elf_machine_of_il2cpp();
     LOGI("架构检查：引擎=%s il2cpp=%s", machine_name(kHostMachine), machine_name(game_machine));
     if (game_machine && game_machine != kHostMachine) {
-        LOGE("il2cpp 是 %s、进程是 %s —— 这是翻译层（houdini）环境，原生 hook 不可能生效。",
+        LOGE("il2cpp 是 %s、guest 是 %s，架构不匹配，停止调用。",
              machine_name(game_machine), machine_name(kHostMachine));
-        LOGE("引擎已加载但功能停用：请把模块装在 arm64 真机上使用。");
-        return;
+        return akl::kWrongArchitecture;
     }
-    if (!resolve_api(handle)) { LOGE("il2cpp 导出符号不全"); return; }
+    if (!resolve_api(handle)) { LOGE("il2cpp 导出符号不全"); return akl::kApiUnavailable; }
+    void* domain = nullptr;
+    for (int i = 0; i < 120 && !domain; ++i) {
+        domain = g_api.domain_get();
+        if (!domain) usleep(500 * 1000);
+    }
+    if (!domain || !g_api.thread_attach || !g_api.thread_attach(domain)) {
+        LOGE("无法附加到 il2cpp 线程");
+        return akl::kThreadUnavailable;
+    }
 
-    apply_features();
+    const int installed = apply_features();
+    LOGI("功能安装结果：成功安装 %d 个 hook；战斗效果仍需验证", installed);
 
+    bool pending = false;
     if (g_cfg.instant) {
         pthread_t t;
-        pthread_create(&t, nullptr, instant_win_thread, nullptr);
-        pthread_detach(t);
-        LOGI("一键通关已启动（进战斗后自动结算）");
+        const int error = pthread_create(&t, nullptr, instant_win_thread, nullptr);
+        if (error == 0) {
+            pthread_detach(t);
+            pending = true;
+            LOGI("一键通关工作线程已启动；尚未确认结算成功");
+        } else {
+            LOGE("一键通关线程创建失败: %d", error);
+        }
     }
+    return installed > 0 ? akl::kStarted : pending ? akl::kPending : akl::kNoHooks;
+}
+
+void native_start(JNIEnv*, jclass, jint mask, jint speed, jint attack) {
+    LOGI("arm64 引擎返回 status=%d", start_engine(mask, speed, attack));
 }
 
 const JNINativeMethod kMethods[] = {
@@ -491,6 +501,21 @@ const JNINativeMethod kMethods[] = {
 };
 
 }  // namespace
+
+// JNI-shaped guest endpoints. The x86 host calls only NativeBridge trampolines,
+// not these AArch64 addresses. Loading through libnativeloader does not call
+// JNI_OnLoad, so it cannot overwrite the host NativeBridge's registrations.
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_ak_ak_1loader_GuestEngine_probe(JNIEnv*, jclass) {
+    LOGI("AKL-GUEST: arm64 探针已执行");
+    return akl::kGuestProbe;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_ak_ak_1loader_GuestEngine_run(JNIEnv*, jclass, jint mask, jint speed, jint attack) {
+    LOGI("AKL-GUEST: 已进入 arm64 功能引擎");
+    return start_engine(mask, speed, attack);
+}
 
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     JNIEnv* env = nullptr;

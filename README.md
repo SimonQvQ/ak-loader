@@ -3,8 +3,9 @@
 一个完全重写的、**只面向明日方舟**的载入器。没有卡密、没有联网授权、没有第三方游戏支持，
 也没有任何一处代码来自其它模块——从 Flutter 界面、LSPosed 注入到 arm64 行内 hook 全部新写。
 
-Waydroid 适配状态：已加入继承游戏 ClassLoader 命名空间的 arm64 加载路线，
-尚待 Houdini 下安装与战斗实测；编译通过不代表功能验证通过。
+Waydroid 适配状态（v0.5.0 实验版）：x86_64 原生控制端通过游戏原生命名空间加载
+arm64 guest，经 NativeBridge 跳板调用探针和功能入口。尚待 Houdini 下安装与战斗实测；
+编译及模拟接口测试通过不代表功能验证通过。
 当前进度与验收步骤见 [docs/waydroid.md](docs/waydroid.md)。
 
 ## 结构
@@ -25,9 +26,9 @@ android/app/src/main/jniLibs/arm64-v8a/libakl_core.so   预编译产物
    `enabled` / `delay_ms` / `speed_x100`
 2. 清单里声明 `xposedsharedprefs=true`，LSPosed 让游戏进程可读这份配置
 3. `XposedEntry` 只认三个包（官服 / B服 / 台服），`isFirstApplication` 时起线程
-4. 线程按 `delay_ms` 等待，优先使用模块安装目录的 arm64 库，否则解出到游戏的 `code_cache`。
-   用游戏 ClassLoader 作父级单独加载 JNI 桥类，由桥类调用 `System.load`。
-   加载路径和调用方命名空间都记录到日志；x86_64 回退库仅用于诊断。
+4. 只在游戏主进程注入。x86_64 设备先加载 host 库，再由 host 使用游戏 ClassLoader 的
+   原生命名空间加载 APK 资产中的 arm64 guest，校验探针后调用功能入口。
+   arm64 设备沿用独立 JNI 桥类加载引擎的路线。
 5. 原生引擎 `dlopen("libil2cpp.so")`，用 il2cpp 导出的 C 接口走到
    `UnityEngine.Time.set_timeScale`，用自写 16 字节绝对跳转改写序言，实现倍速
 
@@ -56,12 +57,18 @@ flutter build apk --release
 Android SDK Platform 36 与 NDK 27.1.12297006（可用 `ANDROID_NDK_ROOT` 指定）。
 release 走 debug 签名，自用足够。
 
+`bash scripts/build-waydroid.sh` 构建 `build/zoot-waydroid-x64.apk`，CI 也有相同产物：
+安装 ABI 只有 x86_64，arm64 执行端存于
+`assets/akl/libakl_guest.so`。它仍依赖 Houdini，不能在没有翻译层的 x86_64 系统上运行 arm64 游戏功能。
+控制端源文件为 `waydroid_loader.cpp` / `translated_engine.cpp`，已替换原来的 x86_64 空实现。
+`bash scripts/test-translated-engine.sh` 使用模拟平台接口检查跨架构调用协议、错误处理和重复注入保护。
+
 详细设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 开源
 
-GPL-3.0。原生引擎不链接任何第三方 hook 库（`llvm-nm -D` 只会看到 `JNI_OnLoad`
-一个导出，依赖仅 libc/liblog/libdl）。
+GPL-3.0。原生引擎不链接第三方 hook 库；JNI 入口包括 `JNI_OnLoad` 及 guest 探针、
+功能入口。C++ 运行库静态链接，平台依赖为 libc / liblog / libdl。
 
 ## 使用
 

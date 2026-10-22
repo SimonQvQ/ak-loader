@@ -20,6 +20,7 @@ android/app/.cxx/
 
 # 预编译 native 产物：由 scripts/build-native.sh 从源码生成
 android/app/src/main/jniLibs/
+android/app/src/main/assets/akl/*.so
 
 # 编译期依赖（由 scripts/fetch-xposed-api.sh 下载）
 android/app/libs/
