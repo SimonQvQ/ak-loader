@@ -8,12 +8,14 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.io.File
 import java.util.zip.ZipFile
+import dalvik.system.PathClassLoader
+import java.lang.reflect.InvocationTargetException
 
 /**
  * 只在明日方舟进程里工作：
  *   1. 从本模块的 SharedPreferences 读配置（LSPosed 的 xposedsharedprefs 机制）
  *   2. 按配置延迟
- *   3. 把本模块 APK 里的 libakl_core.so 释放到游戏自己的 code_cache 目录并加载
+ *   3. 在继承游戏原生命名空间的 ClassLoader 中加载 arm64 引擎
  *   4. 交给 native 引擎处理 il2cpp
  */
 class XposedEntry : IXposedHookLoadPackage {
@@ -22,6 +24,9 @@ class XposedEntry : IXposedHookLoadPackage {
         private const val MODULE_PKG = "dev.ak.ak_loader"
         private const val LIB_ARM64 = "lib/arm64-v8a/libakl_core.so"
         private const val LIB_X64 = "lib/x86_64/libakl_core.so"
+        private const val BRIDGE_CLASS = "dev.ak.ak_loader.NativeBridge"
+        // JNI 返回后仍保留加载器，避免原生 hook 还在使用时库被卸载。
+        private var engineClassLoader: ClassLoader? = null
         private val GAMES = setOf(
             "com.hypergryph.arknights",
             "com.hypergryph.arknights.bilibili",
@@ -67,39 +72,57 @@ class XposedEntry : IXposedHookLoadPackage {
                 if (delayMs > 0) Thread.sleep(delayMs.toLong())
                 val ctx = currentApplication()
                 val apk = moduleApk(ctx)
-                // 优先用"模块自己的 nativeLibraryDir"里的 so：
-                // 只有在那种位置，bionic 才会把加载请求交给 houdini 原生桥，
-                // arm64 的库才可能被翻译执行（这是 Waydroid 这类 x86_64 容器里唯一的路）。
-                val nativeDirLib = moduleNativeLibDir(apk)
-                if (nativeDirLib != null) {
-                    try {
-                        System.load(nativeDirLib.absolutePath)
-                        log("arm64 引擎从 nativeLibraryDir 加载成功：${nativeDirLib.absolutePath}")
-                        NativeBridge.start(mask, speedX100, atkX10)
-                        log("引擎已注入 mask=0x${Integer.toHexString(mask)} speed=x${speedX100 / 100.0} atk=x${atkX10 / 10.0}")
-                        return@Thread
-                    } catch (e: UnsatisfiedLinkError) {
-                        log("nativeLibraryDir 里的 so 加载失败（${e.message}），改用 code_cache")
-                    }
-                }
-                val lib = extractNative(ctx, apk, false)
+                val lib = moduleNativeLibDir(apk) ?: extractNative(ctx, apk, false)
                 try {
-                    System.load(lib.absolutePath)
+                    startInGameNamespace(ctx, apk, lib, mask, speedX100, atkX10)
+                    log("arm64 引擎调用完成；是否找到 il2cpp / 安装 hook 请看 AKL 原生日志")
                 } catch (e: UnsatisfiedLinkError) {
-                    // x86 容器 + houdini 跑 arm 游戏时，进程是 EM_X86_64，
-                    // 内核链接器拒绝加载 arm64 so。回退 x86_64 版让引擎能起来，
-                    // 但 houdini 翻译层下无法 inline hook arm64 原生代码。
-                    log("arm64 so 加载失败（${e.message}），回退 x86_64")
+                    log("游戏命名空间加载 arm64 失败（${e.message}）")
+                    val hasX64 = ZipFile(apk).use { it.getEntry(LIB_X64) != null }
+                    if (!hasX64) throw e
                     val alt = extractNative(ctx, apk, true)
-                    System.load(alt.absolutePath)
-                    log("警告：当前为 houdini/翻译层环境，原生 hook 不可用，请用真机 arm64 测试")
+                    NativeBridge.loadAndStart(alt.absolutePath, mask, speedX100, atkX10)
+                    log("已回退 x86_64 诊断引擎，战斗功能未启用")
                 }
-                NativeBridge.start(mask, speedX100, atkX10)
-                log("引擎已注入 mask=0x${Integer.toHexString(mask)} speed=x${speedX100 / 100.0} atk=x${atkX10 / 10.0}")
             } catch (t: Throwable) {
                 log("注入失败: $t")
             }
         }, "akl-loader").start()
+    }
+
+    /**
+     * libnativeloader 按调用方 ClassLoader 选择原生命名空间。
+     * 用游戏 ClassLoader 作父级，让子命名空间继承其 NativeBridge 属性；
+     * 只把 JNI 桥类放进子加载器，避免把 LSPosed 的宿主命名空间带进来。
+     * 这是待 Waydroid 实测的加载路线，不代表 Houdini 下 hook 已验证。
+     */
+    private fun startInGameNamespace(
+        ctx: Context, apk: String, lib: File, mask: Int, speedX100: Int, atkX10: Int,
+    ) {
+        val searchPath = listOf(ctx.applicationInfo.nativeLibraryDir, lib.parent)
+            .filterNotNull().distinct().joinToString(File.pathSeparator)
+        val loader = object : PathClassLoader(apk, searchPath, ctx.classLoader) {
+            override fun loadClass(name: String, resolve: Boolean): Class<*> {
+                if (name != BRIDGE_CLASS) return super.loadClass(name, resolve)
+                synchronized(this) {
+                    val found = findLoadedClass(name) ?: findClass(name)
+                    if (resolve) resolveClass(found)
+                    return found
+                }
+            }
+        }
+        val bridge = loader.loadClass(BRIDGE_CLASS)
+        check(bridge.classLoader === loader) { "JNI 桥类未隔离" }
+        engineClassLoader = loader
+        log("游戏命名空间：parent=${ctx.classLoader}, search=$searchPath, so=$lib")
+        try {
+            bridge.getMethod(
+                "loadAndStart", String::class.java, Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+            ).invoke(null, lib.absolutePath, mask, speedX100, atkX10)
+        } catch (e: InvocationTargetException) {
+            throw (e.targetException ?: e)
+        }
     }
 
     /**

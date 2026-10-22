@@ -1,6 +1,6 @@
 # Waydroid 适配与验证记录
 
-## 当前状态（2026-10-21）
+## 当前状态（2026-10-22）
 
 目标是在 Waydroid x86_64 + Houdini 下运行 arm64 引擎。**当前尚未验证战斗功能生效。**
 
@@ -16,6 +16,8 @@
   纯 arm64 包混入 x86_64 库会直接失败；同时检查 `resources.arsc` 不压缩及 4 字节对齐。
 - 本次本地 Kotlin、arm64/x86_64 原生编译通过；ADB 监听套接字被会话沙箱拒绝
   （`Operation not permitted`），未能安装新版或在游戏中验证。
+- 新版尚未上传：GitHub 连接的 Git tree 写入返回 `403 Resource not accessible by integration`，
+  本机命令行也无法连接 GitHub。已发布的 v0.4.0 APK 使用旧加载路线。
 
 下一次实测需确认三层结果：
 
@@ -136,7 +138,7 @@ Waydroid 的 arm64 引擎桥接路线仍需另行实测，见文首。
 4. 若报 `定位不到模块 APK`，把日志发我——说明该 Xposed 实现既不暴露 codeSource、
    maps 里也没有 APK 路径，需要再加一条回退。
 
-## 结论：Waydroid 无法承载 arm64 原生 LSPosed 模块（2026-10-21 实测）
+## 旧 nativeLibraryDir 加载路线的补充实测（2026-10-21）
 
 证据链（`/data/adb/lspd/log/verbose_*.log`，游戏进程 pid 10127）：
 
@@ -155,10 +157,10 @@ I/LSPosed-Bridge] [AKL] arm64 so 加载失败（... 同上），回退 x86_64
 2. 但明日方舟在 Waydroid 里是 **x86_64 进程**（arm64 的 libil2cpp.so 由 houdini64 翻译执行，见
    `/proc/<pid>/maps` 里 `lib/arm64/libil2cpp.so`），所以 `System.load()` 走的是 **x86_64 bionic linker**，
    它按 ELF machine 校验，直接拒绝 EM_AARCH64 的 .so。
-3. houdini 的 arm64 加载器只服务“被翻译的 arm64 代码”自己的 dlopen，宿主 x86_64 进程借不到它。
-   单独验证：arm64 ELF 可执行文件在本环境能跑，`dlopen("/data/local/tmp/libakl_core.so")` 返回 OK
-   （`dlsym JNI_OnLoad = 0x1acddb20`）——即“arm64 so 本身没问题，是宿主进程位数不对”。
-4. 唯一可能让 arm64 模块生效的方式是：被 hook 的目标进程本身是 arm64 进程（真机 / arm64 容器），
-   此时 linker 是 arm64、houdini 不参与。Waydroid(x86_64) 无解。
+3. 单独验证：arm64 ELF 可执行文件在本环境能跑，`dlopen("/data/local/tmp/libakl_core.so")` 返回 OK
+   （`dlsym JNI_OnLoad = 0x1acddb20`）。该测试只在独立进程加载库并查找地址，
+   没有调用 `JNI_OnLoad`，也没有验证游戏进程内的 JNI、il2cpp 或战斗功能。
+4. 上述日志未覆盖继承游戏原生命名空间的 ClassLoader 加载路线；
+   它证明旧路线失败，尚不能证明 Waydroid 的所有桥接路线都不可行。
 
-**因此：功能验证必须在 arm64 真机（Android 8+ + LSPosed 1.9.x）上做；Waydroid 只能验到此为止。**
+当前尝试及验收条件见文首。新的加载路线仍需在 Waydroid 内实测。

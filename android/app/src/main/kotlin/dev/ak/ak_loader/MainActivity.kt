@@ -32,6 +32,7 @@ class MainActivity : FlutterActivity() {
                         "life" to prefs.getBoolean("f_life", false),
                         "freeze" to prefs.getBoolean("f_freeze", false),
                         "win" to prefs.getBoolean("f_win", false),
+                        "instant" to prefs.getBoolean("f_instant", false),
                         "atkX10" to prefs.getInt("atk_x10", 10),
                     )
                 )

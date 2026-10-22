@@ -444,11 +444,9 @@ void native_start(JNIEnv*, jclass, jint mask, jint speedX100, jint atkX10) {
     LOGI("引擎启动 mask=0x%x scale=x%.2f", mask, g_cfg.scale);
 
 #if !defined(__aarch64__)
-    // 这个 so 只能在 arm64 上做 inline hook。
-    // 在 x86_64（Waydroid 容器 / 模拟器）里，游戏是 arm64 被 houdini 翻译执行的，
-    // 改内存里的 arm64 指令对翻译后的代码毫无影响，直接停用比乱 hook 安全。
-    LOGE("本进程是 x86_64：运行的是翻译层里的 arm64 游戏，原生 hook 无法生效，功能停用。");
-    LOGE("请把模块装在 arm64 真机上；此构建存在的意义只是让引擎能加载并给出原因。");
+    // x86_64 构建没有 arm64 hook 后端；这不排除用 NativeBridge 加载 arm64 构建。
+    LOGE("当前是非 arm64 诊断引擎：未实现该架构的 hook 后端，战斗功能停用。");
+    LOGE("Waydroid 需验证游戏命名空间中的 arm64 引擎加载路线。");
     return;
 #endif
 
@@ -469,7 +467,7 @@ void native_start(JNIEnv*, jclass, jint mask, jint speedX100, jint atkX10) {
     if (!find_module("libil2cpp.so", g_il2cpp)) { LOGE("取不到代码段"); return; }
 
     const unsigned game_machine = elf_machine_of_il2cpp();
-    LOGI("架构检查：进程=%s il2cpp=%s", machine_name(kHostMachine), machine_name(game_machine));
+    LOGI("架构检查：引擎=%s il2cpp=%s", machine_name(kHostMachine), machine_name(game_machine));
     if (game_machine && game_machine != kHostMachine) {
         LOGE("il2cpp 是 %s、进程是 %s —— 这是翻译层（houdini）环境，原生 hook 不可能生效。",
              machine_name(game_machine), machine_name(kHostMachine));
@@ -499,7 +497,10 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) return -1;
     jclass c = env->FindClass("dev/ak/ak_loader/NativeBridge");
     if (!c) { LOGE("找不到 NativeBridge"); return -1; }
-    env->RegisterNatives(c, kMethods, sizeof(kMethods) / sizeof(kMethods[0]));
+    if (env->RegisterNatives(c, kMethods, sizeof(kMethods) / sizeof(kMethods[0])) != JNI_OK) {
+        LOGE("NativeBridge JNI 注册失败");
+        return JNI_ERR;
+    }
     LOGI("akl_core 已加载");
     return JNI_VERSION_1_6;
 }

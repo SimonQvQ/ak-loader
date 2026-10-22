@@ -3,6 +3,10 @@
 一个完全重写的、**只面向明日方舟**的载入器。没有卡密、没有联网授权、没有第三方游戏支持，
 也没有任何一处代码来自其它模块——从 Flutter 界面、LSPosed 注入到 arm64 行内 hook 全部新写。
 
+Waydroid 适配状态：已加入继承游戏 ClassLoader 命名空间的 arm64 加载路线，
+尚待 Houdini 下安装与战斗实测；编译通过不代表功能验证通过。
+当前进度与验收步骤见 [docs/waydroid.md](docs/waydroid.md)。
+
 ## 结构
 
 ```
@@ -21,8 +25,9 @@ android/app/src/main/jniLibs/arm64-v8a/libakl_core.so   预编译产物
    `enabled` / `delay_ms` / `speed_x100`
 2. 清单里声明 `xposedsharedprefs=true`，LSPosed 让游戏进程可读这份配置
 3. `XposedEntry` 只认三个包（官服 / B服 / 台服），`isFirstApplication` 时起线程
-4. 线程按 `delay_ms` 等待，然后从模块 APK 里解出 `lib/arm64-v8a/libakl_core.so`
-   落到**游戏自己的** `code_cache`，`System.load` —— 不需要 root、不写游戏数据
+4. 线程按 `delay_ms` 等待，优先使用模块安装目录的 arm64 库，否则解出到游戏的 `code_cache`。
+   用游戏 ClassLoader 作父级单独加载 JNI 桥类，由桥类调用 `System.load`。
+   加载路径和调用方命名空间都记录到日志；x86_64 回退库仅用于诊断。
 5. 原生引擎 `dlopen("libil2cpp.so")`，用 il2cpp 导出的 C 接口走到
    `UnityEngine.Time.set_timeScale`，用自写 16 字节绝对跳转改写序言，实现倍速
 

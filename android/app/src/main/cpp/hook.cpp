@@ -3,8 +3,8 @@
 #if !defined(__aarch64__)
 
 // x86_64（以及其它架构）目前没有 inline hook 后端：
-// 在 houdini 翻译层里被翻译执行的是 arm64 代码，任何本进程写入都无意义，
-// 因此这里只提供空实现，让引擎能正常加载并把原因报给用户。
+// 这里只提供空实现。Houdini 下应尝试加载 arm64 引擎，
+// 而不是把 x86_64 诊断库的加载成功当作功能成功。
 #include <android/log.h>
 bool hook_install(InlineHook&, void*, void*) {
     __android_log_print(ANDROID_LOG_WARN, "AKL", "该架构没有 hook 后端，跳过");
