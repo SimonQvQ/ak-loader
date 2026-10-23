@@ -7,6 +7,9 @@ on:
   workflow_dispatch:
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
@@ -23,77 +26,63 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Flutter
+      - name: Flutter 3.47.7
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.7'
           channel: stable
           cache: true
 
-      - name: NDK + build-tools
+      - name: Android toolchain
         run: |
           set -euo pipefail
-          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-          SDKMANAGER="$(ls -d "$ANDROID_SDK_ROOT"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)"
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          SDKMANAGER="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          "$SDKMANAGER" --install "ndk;27.1.12297006" "build-tools;35.0.0" "platforms;android-35" >/dev/null
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.1.12297006" >> "$GITHUB_ENV"
-          ls "$ANDROID_SDK_ROOT/ndk" 
+          "$SDKMANAGER" --install "ndk;27.1.12297006" "build-tools;35.0.0" "platforms;android-36" "cmake;3.22.1" >/dev/null
 
-      - name: Xposed 编译期 API
-        run: bash scripts/fetch-xposed-api.sh
-
-      - name: 原生引擎（arm64 guest + x86_64 host）
-        run: bash scripts/build-native.sh
-
-      - name: x86_64 桥接控制流程回归检查
-        run: bash scripts/test-translated-engine.sh
-
-      - name: Flutter release APK
+      - name: Flutter analysis
         run: |
           flutter pub get
-          flutter build apk --release
+          flutter analyze
 
-      - name: arm64-only 变体（arm64 设备用）
-        run: |
-          set -euo pipefail
-          cp build/app/outputs/flutter-apk/app-release.apk zoot-universal.apk
-          # 清掉其他 ABI 的预编译 .so，确保打出来只有 arm64-v8a
-          rm -rf android/app/src/main/jniLibs/x86_64 android/app/src/main/jniLibs/x86 \
-                 android/app/src/main/jniLibs/armeabi-v7a
-          flutter build apk --release --target-platform android-arm64 -Pabi=arm64-v8a
-          cp build/app/outputs/flutter-apk/app-release.apk zoot-arm64.apk
-          python3 scripts/verify-apk.py zoot-universal.apk --abis arm64-v8a,armeabi-v7a,x86_64 --engine-abis arm64-v8a,x86_64 --guest
-          python3 scripts/verify-apk.py zoot-arm64.apk --abis arm64-v8a --engine-abis arm64-v8a --guest
-          BT="$ANDROID_SDK_ROOT/build-tools/35.0.0"
-          "$BT/apksigner" verify zoot-universal.apk && echo "universal 签名 OK"
-          "$BT/apksigner" verify zoot-arm64.apk && echo "arm64 签名 OK"
-          "$BT/aapt2" dump badging zoot-arm64.apk | grep -E "native-code|application-label:"
-          ls -l zoot-*.apk
+      - name: Host bridge and battle policy tests (ASAN / UBSAN)
+        run: bash scripts/test-translated-engine.sh
 
-      - name: Waydroid x86_64 变体（含 arm64 guest 资产）
+      - name: Waydroid x86_64 APK (with ARM64 guest)
+        run: bash scripts/build-waydroid.sh
+
+      - name: APK signature and checksum
+        working-directory: build
         run: |
-          set -euo pipefail
-          bash scripts/build-waydroid.sh
-          cp build/zoot-waydroid-x64.apk zoot-waydroid-x64.apk
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify zoot-waydroid-x64.apk
+          sha256sum zoot-waydroid-x64.apk > SHA256SUMS
 
-      - name: 上传产物
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: zoot-apk
+          name: zoot-waydroid-x64
           path: |
-            zoot-universal.apk
-            zoot-arm64.apk
-            zoot-waydroid-x64.apk
+            build/zoot-waydroid-x64.apk
+            build/SHA256SUMS
+          if-no-files-found: error
           retention-days: 30
 
-      - name: tag 时发 Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: apk
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: zoot-waydroid-x64
+          path: release
+      - uses: softprops/action-gh-release@v2
         with:
           files: |
-            zoot-universal.apk
-            zoot-arm64.apk
-            zoot-waydroid-x64.apk
+            release/zoot-waydroid-x64.apk
+            release/SHA256SUMS
           generate_release_notes: true

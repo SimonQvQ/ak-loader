@@ -1,88 +1,29 @@
-# 架构说明
+# 架构
 
-## 三层分离
+控制台将开关、延迟、倍速与倍率写入 SharedPreferences("akl")。LSPosed 的 xposedsharedprefs 机制使游戏主进程可读取它；每次启动快照配置，修改后需重启游戏。
 
-```
-┌──────────────────────────────┐
-│ Flutter 控制台（本模块进程）   │  只写配置，不做任何注入
-└───────────────┬──────────────┘
-                │ SharedPreferences("akl")
-                ▼
-┌──────────────────────────────┐
-│ XposedEntry（游戏进程内）      │  延迟 → 解 so → System.load → 调 JNI
-└───────────────┬──────────────┘
-                │ JNI: start(speedX100)
-                ▼
-┌──────────────────────────────┐
-│ libakl_core.so（原生引擎）     │  定位 il2cpp → 找方法 → 装 hook
-└──────────────────────────────┘
-```
+## 加载链路
 
-这样切分的原因：控制台崩了不影响游戏，引擎崩了只影响当次启动；配置与执行解耦，
-不需要在游戏进程里跑任何 UI 代码。
+1. XposedEntry 限定游戏主进程和已验证版本；模块关闭时退出。
+2. 将所需库从本模块APK解到游戏自己的code_cache/akl。
+3. x64侧加载host，运行时解析ART的NativeLoader/NativeBridge接口；必要时从已加载ELF解析被命名空间隐藏的导出，拒绝lazy转发库。
+4. 以游戏ClassLoader的原生命名空间加载arm64 guest，借JNI形状跳板调用探针和引擎入口。
+5. 探针执行一次Dobby重定位测试，检查预热函数改写和恢复。默认随后启动功能引擎。
+6. guest等待已加载libil2cpp，安装BNM late-init。回调检查域与线程上下文，保护setup只执行一次。
+7. BNM载入后通过当前导出元数据匹配完整方法签名，Dobby安装钩子。未找到目标时明确记录不可用。
 
-## 配置传递
+arm64设备使用独立桥类的JNI路线；本次设备验证仅覆盖Waydroid x64/Houdini14。
 
-`AndroidManifest.xml` 里 `xposedsharedprefs=true` 让 LSPosed 把模块的
-`shared_prefs/akl.xml` 对目标进程可读，引擎侧用 `XSharedPreferences` 读，
-**不需要 root，也不需要往游戏目录写文件**。
+## 一键结算
 
-## so 的落地
+沿用原模块的Scheduler计数选择和WIN/false/null参数。当前游戏StartGame可通过GameMode回调延迟进入state2，因此在已核对的 `<StartGame>b__392_0` 原回调返回后执行一次结算。当前ObscuredInt通过运行时转换、拆箱、field_set_value写入，不猜结构、不复制旧版16字节。
 
-模块 APK 里的 `lib/arm64-v8a/libakl_core.so` 不能直接从别的应用私有目录 `System.load`。
-`XposedEntry` 用 `ZipFile` 把它解到**游戏自己的** `codeCacheDir/akl/`，再 `System.load`。
-既不污染游戏数据目录，也不依赖模块自身的 lib 提取。
+## 依赖与布局
 
-模块 APK 路径来自类加载器的 `CodeSource`（api-82 没有 `LoadPackageParam.modulePath`），
-并用"能当 zip 打开且含目标条目"双重校验。
+BNM/Dobby固定到脚本中的提交，下载放在忽略的build/native-deps中。本项目维护可重复应用的Android编译补丁与当前游戏布局适配。游戏2.7.81的Class计数偏移和vtable位置以当前导出访问器及实际调用指令为证，详见current-game-native-evidence.md。
 
-## 行内 hook（hook.cpp）
+自制hook.cpp/h已移除。BNM的自定义类/协程管理关闭，未使用的自定义List与finalizer模板初始化也关闭；这些能力不参与现有功能。
 
-arm64 上的最小可靠改写：
+## 验证边界
 
-```
-目标序言 16B ──改写后──▶   ldr x16, #8
-                          br  x16
-                          .quad 我们的函数        (共 16 字节)
-
-跳板 16B + 16B         ─▶  原序言 16B
-                          ldr x16, #8 / br x16
-                          .quad 目标+16
-```
-
-流程：
-
-1. 读取序言 4 条指令，逐条判断是否 PC 相对（B/BL、CBZ/CBNZ、TBZ/TBNZ、ADR/ADRP、LDR literal）
-2. 命中任意一条 → **直接放弃**，打日志返回 false，不做不可靠的指令重定位
-3. `mmap` 一页 RW，写入"原序言 + 跳回桩"，再 `mprotect` 成 RX
-4. `mprotect` 目标页 RWX → 写跳转桩 → `__builtin___clear_cache` 刷 icache → 恢复 RX
-
-第 2 步是刻意保守的：重定位出错会静默改坏游戏逻辑，宁可这一版不生效也不乱改。
-
-## 方法定位（ak_core.cpp）
-
-不硬编码偏移：
-
-1. `dlopen("libil2cpp.so")`，`dl_iterate_phdr` 取 PF_X 段区间作为"合法代码地址"判据
-2. `il2cpp_domain_get_assemblies` 遍历程序集，对每个 image 调
-   `il2cpp_class_from_name(image, "UnityEngine", "Time")`
-3. `il2cpp_class_get_method_from_name(klass, "set_timeScale", 1)` 拿到 `MethodInfo*`
-4. `MethodInfo` 布局随 Unity 版本变化，因此把 `+0x00/+0x08/+0x18` 三个候选指针
-   逐个做"落在 il2cpp 代码段内"校验，取第一个成立的，并打印判定依据
-5. 装 hook；失败则日志说明原因，不影响游戏正常运行
-
-## 与市面模块的差异
-
-| 维度 | 常见商业模块 | 本工程 |
-|---|---|---|
-| 授权 | 卡密 / 设备绑定 / 联网校验 | 无，纯本地开关 |
-| 覆盖 | 多游戏聚合 | 只认明日方舟三个包 |
-| 技术栈 | 常见 Dobby/Substrate 等第三方库 | 全部自写，仅依赖 libc/liblog/libdl |
-| 行为 | 大量反射 + 主动对抗检测 | 只做一次方法 hook，不做对抗 |
-
-## 已知限制
-
-- 只实现倍速，未做功能面板
-- 32 位进程不带 so（会打日志退出）
-- 序言含 PC 相对指令时 hook 不生效（这是设计选择，不是 bug）
-- 需要 LSPosed（Android 10+ 官方 Xposed 不可用）
+主机测试验证跨架构协议和导出解析，不执行Houdini或游戏。ARM夹具验证Dobby指令重定位，不能证明具体战斗效果。真实演习证据见[本轮功能测试](feature-test-current.md)；用户确认的一键结算结果单独记录，不推广到特殊任务或奖励。

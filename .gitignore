@@ -29,3 +29,12 @@ android/app/libs/
 .idea/
 .vscode/
 android/.kotlin/
+
+# Python helpers and local environment / signing configuration
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+!.env.example
+key.properties

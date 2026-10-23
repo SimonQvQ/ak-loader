@@ -25,6 +25,8 @@ def verify(path, abis, engine_abis, guest=False):
             if machine != machines[abi] or header[4] != expected_class:
                 raise ValueError(f"ELF 架构与目录不符：{info.filename}")
         if guest:
+            for license_name in ("BNM.txt", "Dobby.txt"):
+                apk.getinfo(f"assets/licenses/{license_name}")
             with apk.open("assets/akl/libakl_guest.so") as lib:
                 header = lib.read(20)
             if (len(header) != 20 or header[:6] != b"\x7fELF\x02\x01"

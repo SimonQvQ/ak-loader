@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from design/icon/zoot-icon.svg by render_icons.py. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M40.579,34.103 A24,24 0 0 1 67.421,34.103 L64.065,39.077 A18,18 0 0 0 43.935,39.077 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M73.897,40.579 A24,24 0 0 1 73.897,67.421 L68.923,64.065 A18,18 0 0 0 68.923,43.935 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M67.421,73.897 A24,24 0 0 1 40.579,73.897 L43.935,68.923 A18,18 0 0 0 64.065,68.923 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M34.103,67.421 A24,24 0 0 1 34.103,40.579 L39.077,43.935 A18,18 0 0 0 39.077,64.065 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M49,49 H59 V59 H49 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M32,32 H36 V36 H32 Z M35,35 H37 L46,44 V46 H44 L35,37 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M72,72 H76 V76 H72 Z M62,62 H64 L73,71 V73 H71 L62,64 Z" />
+</vector>

@@ -23,3 +23,7 @@ CPP
     tests/loaded_export_test.cpp android/app/src/main/cpp/loaded_export.cpp \
     -ldl -o "$test_dir/loaded-export-test"
 "$test_dir/loaded-export-test" "$test_dir/libzoot-symbol-fixture.so"
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
+    -fno-omit-frame-pointer -Iandroid/app/src/main/cpp \
+    tests/battle_policy_test.cpp -o "$test_dir/battle-policy-test"
+"$test_dir/battle-policy-test"

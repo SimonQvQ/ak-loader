@@ -16,7 +16,7 @@ import java.lang.reflect.InvocationTargetException
  * 只在明日方舟进程里工作：
  *   1. 从本模块的 SharedPreferences 读配置（LSPosed 的 xposedsharedprefs 机制）
  *   2. 按配置延迟
- *   3. 在继承游戏原生命名空间的 ClassLoader 中加载 arm64 引擎
+ *   3. 在游戏原生命名空间中加载 arm64 引擎
  *   4. 交给 native 引擎处理 il2cpp
  */
 class XposedEntry : IXposedHookLoadPackage {
@@ -59,7 +59,7 @@ class XposedEntry : IXposedHookLoadPackage {
         val delayMs = num("delay_ms", 5000, 0, 60_000)
         val speedX100 = num("speed_x100", 200, 100, 1000)
 
-        // 功能掩码：bit0 倍速 / bit1 无限费用 / bit2 生命不减 / bit3 敌人停滞 / bit4 强制胜利 / bit5 攻击倍率
+        // 功能掩码：bit0 倍速 / bit1 无限费用 / bit2 生命不减 / bit3 敌人停滞 / bit4 强制胜利 / bit5 对敌最终伤害倍率
         var mask = 0
         if (speedX100 > 100) mask = mask or 1
         if (flag("f_cost", false)) mask = mask or (1 shl 1)
@@ -75,6 +75,11 @@ class XposedEntry : IXposedHookLoadPackage {
             try {
                 if (delayMs > 0) Thread.sleep(delayMs.toLong())
                 val ctx = currentApplication()
+                val gameVersion = ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
+                if (gameVersion != "2.7.81") {
+                    log("当前原生布局只验证游戏 2.7.81；检测到 $gameVersion，跳过功能引擎")
+                    return@Thread
+                }
                 val apk = moduleApk(ctx)
                 val machine = Os.uname().machine
                 if (android.os.Process.is64Bit() && machine in setOf("x86_64", "amd64")) {
@@ -103,7 +108,7 @@ class XposedEntry : IXposedHookLoadPackage {
         when (status) {
             2 -> log("x86_64 → arm64 探针通过；本次未启动功能引擎")
             0 -> log("x86_64 桥接引擎返回：至少一个 hook 已安装，战斗效果待确认")
-            1 -> log("x86_64 桥接已进入 arm64 引擎，异步功能仍在等待验证")
+            1 -> log("x86_64 桥接已异步启动 arm64 引擎，初始化进度见运行日志")
             else -> log("x86_64 桥接启动失败 status=$status，查看 AKL-X64 / AKL 日志定位阶段")
         }
     }
@@ -112,7 +117,7 @@ class XposedEntry : IXposedHookLoadPackage {
      * libnativeloader 按调用方 ClassLoader 选择原生命名空间。
      * 用游戏 ClassLoader 作父级，让子命名空间继承其 NativeBridge 属性；
      * 只把 JNI 桥类放进子加载器，避免把 LSPosed 的宿主命名空间带进来。
-     * 这是待 Waydroid 实测的加载路线，不代表 Houdini 下 hook 已验证。
+     * x64 使用 ART NativeBridge；一键结算已在当前 Waydroid 验证，其他开关分别测试。
      */
     private fun startInGameNamespace(
         ctx: Context, apk: String, lib: File, mask: Int, speedX100: Int, atkX10: Int,

@@ -20,4 +20,4 @@ constexpr int kNotTranslated = -33;
 constexpr int kProbeFailed = -34;
 constexpr int kEntryUnavailable = -35;
 constexpr int kInvalidGuest = -36;
-}
+} // namespace akl

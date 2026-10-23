@@ -39,12 +39,12 @@ class GameEntry {
   final String? version;
 
   factory GameEntry.fromMap(Map<dynamic, dynamic> m) => GameEntry(
-        pkg: m['pkg'] as String,
-        label: m['label'] as String,
-        short: m['short'] as String,
-        installed: m['installed'] as bool,
-        version: m['version'] as String?,
-      );
+    pkg: m['pkg'] as String,
+    label: m['label'] as String,
+    short: m['short'] as String,
+    installed: m['installed'] as bool,
+    version: m['version'] as String?,
+  );
 }
 
 class HomePage extends StatefulWidget {
@@ -120,7 +120,8 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     await _save();
-    final ok = await _channel.invokeMethod<bool>('launch', {'pkg': g.pkg}) ?? false;
+    final ok =
+        await _channel.invokeMethod<bool>('launch', {'pkg': g.pkg}) ?? false;
     if (!mounted) return;
     _toast(ok ? '正在启动${g.short}…' : '启动失败');
   }
@@ -128,7 +129,9 @@ class _HomePageState extends State<HomePage> {
   void _toast(String msg) {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
+      ..showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+      );
   }
 
   @override
@@ -142,8 +145,10 @@ class _HomePageState extends State<HomePage> {
               children: [
                 _engineCard(),
                 const SizedBox(height: 16),
-                const Text('点击图标启动；参数在启动游戏的瞬间生效。',
-                    style: TextStyle(color: Colors.white60, fontSize: 12)),
+                const Text(
+                  '点击图标启动；参数在启动游戏的瞬间生效。',
+                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                ),
                 const SizedBox(height: 12),
                 ..._games.map(_gameTile),
               ],
@@ -162,7 +167,10 @@ class _HomePageState extends State<HomePage> {
               children: [
                 const Icon(Icons.memory),
                 const SizedBox(width: 8),
-                const Text('载入引擎', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                const Text(
+                  '载入引擎',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
                 const Spacer(),
                 Switch(
                   value: _enabled,
@@ -181,9 +189,7 @@ class _HomePageState extends State<HomePage> {
               min: 0,
               max: 30,
               divisions: 30,
-              onChanged: _enabled
-                  ? (v) => setState(() => _delaySec = v)
-                  : null,
+              onChanged: _enabled ? (v) => setState(() => _delaySec = v) : null,
               onChangeEnd: (_) => _save(),
             ),
             _sliderRow(
@@ -193,28 +199,39 @@ class _HomePageState extends State<HomePage> {
               min: 1,
               max: 10,
               divisions: 18,
-              onChanged: _enabled
-                  ? (v) => setState(() => _speed = v)
-                  : null,
+              onChanged: _enabled ? (v) => setState(() => _speed = v) : null,
               onChangeEnd: (_) => _save(),
             ),
             const Divider(height: 24),
             const Align(
               alignment: Alignment.centerLeft,
-              child: Text('战斗功能', style: TextStyle(fontWeight: FontWeight.w600)),
+              child: Text(
+                '战斗功能',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
             ),
-            _switchRow('无限部署费用', 'BattleController.SetCost 覆写为 9999',
-                _cost, (v) { setState(() => _cost = v); _save(); }),
-            _switchRow('生命不减', 'ModifyLifePoint 的扣血值钳到 0',
-                _life, (v) { setState(() => _life = v); _save(); }),
-            _switchRow('敌人停滞', 'BattleEnemy.MoveByRoute 速度置 0',
-                _freeze, (v) { setState(() => _freeze = v); _save(); }),
-            _switchRow('一键通关', '开战后自动调用 BattleController.FinishGame(3,true) 结算胜利',
-                _instant, (v) { setState(() => _instant = v); _save(); }),
-            _switchRow('强制胜利', 'get_gameResult 返回三星结果',
-                _win, (v) { setState(() => _win = v); _save(); }),
+            _switchRow('无限部署费用', '保持充足的部署费用', _cost, (v) {
+              setState(() => _cost = v);
+              _save();
+            }),
+            _switchRow('生命不减', '敌人进入目标点时不扣除生命', _life, (v) {
+              setState(() => _life = v);
+              _save();
+            }),
+            _switchRow('敌人停滞', '阻止敌人沿路线移动', _freeze, (v) {
+              setState(() => _freeze = v);
+              _save();
+            }),
+            _switchRow('一键结算（强制胜利）', '进入战斗后自动结算胜利', _instant, (v) {
+              setState(() => _instant = v);
+              _save();
+            }),
+            _switchRow('失败改为胜利', '将战斗结果改为胜利', _win, (v) {
+              setState(() => _win = v);
+              _save();
+            }),
             _sliderRow(
-              label: '攻击/伤害倍率',
+              label: '对敌最终伤害倍率',
               valueText: 'x${_atk.toStringAsFixed(1)}',
               value: _atk,
               min: 1,
@@ -224,20 +241,30 @@ class _HomePageState extends State<HomePage> {
               onChangeEnd: (_) => _save(),
             ),
             const SizedBox(height: 8),
-            const Text('功能在战斗开始时按名称解析后挂钩；未进入战斗前无影响。',
-                style: TextStyle(color: Colors.white38, fontSize: 11)),
+            const Text(
+              '伤害倍率作用于友方对敌方的普通伤害，保留固定扣血机制。修改配置后重启游戏生效。',
+              style: TextStyle(color: Colors.white38, fontSize: 11),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _switchRow(String title, String subtitle, bool value, ValueChanged<bool> onChanged) {
+  Widget _switchRow(
+    String title,
+    String subtitle,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) {
     return SwitchListTile(
       dense: true,
       contentPadding: EdgeInsets.zero,
       title: Text(title, style: const TextStyle(fontSize: 14)),
-      subtitle: Text(subtitle, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(color: Colors.white38, fontSize: 11),
+      ),
       value: value,
       onChanged: _enabled ? onChanged : null,
     );
@@ -259,7 +286,10 @@ class _HomePageState extends State<HomePage> {
           children: [
             Text(label, style: const TextStyle(color: Colors.white70)),
             const Spacer(),
-            Text(valueText, style: const TextStyle(fontWeight: FontWeight.w600)),
+            Text(
+              valueText,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
           ],
         ),
         Slider(
@@ -280,15 +310,20 @@ class _HomePageState extends State<HomePage> {
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor:
-              g.installed ? const Color(0xFF2E5BE0) : Colors.white24,
-          child: Text(g.short,
-              style: const TextStyle(fontSize: 12, color: Colors.white)),
+          backgroundColor: g.installed
+              ? const Color(0xFF2E5BE0)
+              : Colors.white24,
+          child: Text(
+            g.short,
+            style: const TextStyle(fontSize: 12, color: Colors.white),
+          ),
         ),
         title: Text(g.label),
         subtitle: Text(
           g.installed ? '已安装 · v${g.version ?? '?'}' : '未安装',
-          style: TextStyle(color: g.installed ? Colors.white54 : Colors.redAccent),
+          style: TextStyle(
+            color: g.installed ? Colors.white54 : Colors.redAccent,
+          ),
         ),
         trailing: FilledButton.icon(
           onPressed: g.installed ? () => _launch(g) : null,

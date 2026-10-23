@@ -2,13 +2,15 @@
 # Build in a disposable copy so trimming ABIs never changes the source checkout.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+export ZOOT_NATIVE_DEPS_DIR="${ZOOT_NATIVE_DEPS_DIR:-$repo_root/build/native-deps}"
 build_dir="$(mktemp -d)"
 trap 'rm -rf "$build_dir"' EXIT
 python3 - "$repo_root" "$build_dir/project" <<'PY'
 import shutil
 import sys
 shutil.copytree(sys.argv[1], sys.argv[2], ignore=shutil.ignore_patterns(
-    '.git', 'build', '.dart_tool', '.gradle', '.kotlin', '.idea', '*.apk', '*.iml'))
+    '.git', 'build', '.dart_tool', '.gradle', '.kotlin', '.idea', '__pycache__',
+    '*.apk', '*.iml', 'local.properties', 'key.properties', '*.keystore', '*.jks'))
 PY
 cd "$build_dir/project"
 bash scripts/build-native.sh

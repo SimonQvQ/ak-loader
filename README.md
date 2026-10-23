@@ -1,124 +1,84 @@
-# 明日方舟 · 启动器（ak_loader）
+# zoot · 明日方舟载入器
 
-一个完全重写的、**只面向明日方舟**的载入器。没有卡密、没有联网授权、没有第三方游戏支持，
-也没有任何一处代码来自其它模块——从 Flutter 界面、LSPosed 注入到 arm64 行内 hook 全部新写。
+[![build](https://github.com/SimonQvQ/ak-loader/actions/workflows/build.yml/badge.svg)](https://github.com/SimonQvQ/ak-loader/actions/workflows/build.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
-Waydroid 适配状态（v0.5.0 实验版）：x86_64 原生控制端通过游戏原生命名空间加载
-arm64 guest，经 NativeBridge 跳板调用探针和功能入口。已在 Houdini 14 实测探针执行成功；
-延迟启动后可附加 il2cpp 线程、找到目标类，但倍速 hook 因不支持目标序言而拒绝安装。
-YW-3 演习中费用、生命、停滞、强制胜利和一键通关均未生效，
-详见 [战斗测试记录](docs/waydroid-battle-test-2026-10-22.md)。x64 实验包默认只运行探针。
-当前进度与验收步骤见 [docs/waydroid.md](docs/waydroid.md)。
+Flutter 控制台 + LSPosed 模块，完整开放界面、Kotlin 入口、x64 加载桥、ARM64 执行端、依赖适配脚本、测试和图标源文件。执行端参考原模块的 BNM / Dobby 结构；本项目代码不包含卡密和联网授权逻辑。
 
-## 结构
+**当前版本 0.6.1，已验证环境：官服 2.7.81 / Unity 2021.3.39f1，Waydroid Android 13 x86_64 + Houdini 14。** 游戏版本不匹配时跳过引擎。其他设备、服区及转译层版本尚未验证。
 
-```
-lib/main.dart                       Flutter 控制台（开关 / 延迟 / 倍速 / 启动）
-android/app/src/main/kotlin/.../     MainActivity（通道）、XposedEntry（注入）、NativeBridge
-android/app/src/main/assets/xposed_init     Xposed 入口声明
-android/app/src/main/cpp/            原生引擎
-  ak_core.cpp                        il2cpp 定位 + UnityEngine.Time 劫持
-  hook.cpp / hook.h                  自写 arm64 行内 hook
-android/app/src/main/jniLibs/arm64-v8a/libakl_core.so   预编译产物
-```
+## 功能与验证
 
-## 运行链路
+| 功能 | 当前行为及证据 |
+| --- | --- |
+| 一键结算 | 开战就绪后同步 Scheduler 计数并调用胜利结算；YW-EX-6 用户实战确认，17-4 演习开场三星结算 |
+| 无限部署费用 | 部署扣费后回填；实际费用 84 → 99 |
+| 生命不减 | 漏怪不扣目标点生命；演习多次漏怪仍保持 3 |
+| 倍速 | 战斗倍率；实际读取 x2、部署减速 x0.4、暂停 0；结束后恢复 x1 |
+| 敌人停滞 | 阻止敌人沿路线移动，保留攻击等机制；位置与画面均已确认 |
+| 失败改为胜利 | 生命耗尽后进入胜利结果页；保留漏怪星级，实测两星 |
+| 对敌最终伤害倍率 | 只缩放友方对敌方的普通最终伤害；x2 的实际 HP 差已验证，治疗、自回复、敌方伤害及敌方回血均保持原值 |
 
-1. 控制台把参数写进本模块的 `SharedPreferences("akl")`：
-   `enabled` / `delay_ms` / `speed_x100`
-2. 清单里声明 `xposedsharedprefs=true`，LSPosed 让游戏进程可读这份配置
-3. `XposedEntry` 只认三个包（官服 / B服 / 台服），`isFirstApplication` 时起线程
-4. 只在游戏主进程注入。x86_64 设备先加载 host 库，再由 host 使用游戏 ClassLoader 的
-   原生命名空间加载 APK 资产中的 arm64 guest，校验探针后调用功能入口。
-   arm64 设备沿用独立 JNI 桥类加载引擎的路线。
-5. 原生引擎 `dlopen("libil2cpp.so")`，用 il2cpp 导出的 C 接口走到
-   `UnityEngine.Time.set_timeScale`，用自写 16 字节绝对跳转改写序言，实现倍速
-
-## 关于"从零写的 hook"
-
-`hook.cpp` 做的是：
-
-- 校验序言 4 条指令里没有 PC 相对指令（B/BL、CBZ、TBZ、ADR、LDR literal），
-  有就直接放弃并打日志，不做不可靠的指令重定位
-- `ldr x16,#8 ; br x16 ; .quad dst` 作为 16 字节跳转桩
-- 跳板 = 原序言 16 字节 + 同一跳转桩指回 `target+16`
-- `mprotect` 改 RWX 写入、`__builtin___clear_cache` 刷 icache、再恢复 RX
-
-`MethodInfo` 的布局各版本不同，`ak_core.cpp` 不硬编码偏移，而是把 0x00/0x08/0x18
-三个候选指针逐个用"落在 il2cpp 代码段内"来校验，取第一个成立的，并打日志。
-
-## 构建
-
-```bash
-./scripts/fetch-xposed-api.sh     # 取编译期 API（不打包进 APK）
-./scripts/build-native.sh         # 从源码编译 libakl_core.so
-flutter build apk --release
-```
-
-需要：Flutter 3.x、JDK 21（JDK 25+ 会在 AGP 的 jlink 阶段失败，见文末）、
-Android SDK Platform 36 与 NDK 27.1.12297006（可用 `ANDROID_NDK_ROOT` 指定）。
-release 走 debug 签名，自用足够。
-
-`bash scripts/build-waydroid.sh` 构建 `build/zoot-waydroid-x64.apk`，CI 也有相同产物：
-安装 ABI 只有 x86_64，arm64 执行端存于
-`assets/akl/libakl_guest.so`。它仍依赖 Houdini，不能在没有翻译层的 x86_64 系统上运行 arm64 游戏功能。
-控制端源文件为 `waydroid_loader.cpp` / `translated_engine.cpp`，已替换原来的 x86_64 空实现。
-`bash scripts/test-translated-engine.sh` 使用模拟平台接口检查跨架构调用协议、错误处理和重复注入保护。
-
-详细设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
-
-## 开源
-
-GPL-3.0。原生引擎不链接第三方 hook 库；JNI 入口包括 `JNI_OnLoad` 及 guest 探针、
-功能入口。C++ 运行库静态链接，平台依赖为 libc / liblog / libdl。
+特殊固定扣血机制不参与伤害倍率。七项全开组合已通过 17-4 演习，详见[功能测试记录](docs/feature-test-current.md)。元数据匹配、探针通过和钩子安装成功分别代表不同阶段，奖励领取与特殊任务条件需单独验证。
 
 ## 使用
 
-1. 安装 APK，在 LSPosed 里启用并勾选明日方舟（作用域已预置三个包）
-2. 打开 APP 调延迟与倍速
-3. 启动游戏；`logcat -s AKL` 可看到引擎注入与 hook 日志
+1. 在已配置 LSPosed 和 ARM 翻译层的 Waydroid 安装 x64 APK。
+2. 在 LSPosed 启用 zoot，作用域选择明日方舟。
+3. 打开 zoot，启用引擎并设置功能；从控制台启动游戏。
+4. 修改配置后完全重启游戏。默认注入延迟为 5 秒。
 
-## 边界（如实说明）
+构建产物可在 [Actions](https://github.com/SimonQvQ/ak-loader/actions/workflows/build.yml) 下载；版本发布见 [Releases](https://github.com/SimonQvQ/ak-loader/releases)。请核对版本，历史 Release 不代表当前实现。
 
-- 只做倍速这一个功能点，没有原模块的卡密/多游戏/风控绕过那一套
-- 需要设备已装 LSPosed（Android 10+ 官方 Xposed 不可用）
-- 若命中"序言含 PC 相对指令"，hook 会安全放弃而不是硬改，日志里会说明
-- 32 位进程目前不带 so，会打日志后退出（游戏主流为 arm64）
+## 从源码构建
 
-## 构建期踩过的坑
+Linux 环境：Flutter **3.47.7**、JDK **21**、Android SDK **36**、NDK **27.1.12297006**、CMake **3.22.1**、Ninja、Git、Python 3、curl 和 C++ 编译器。
 
-- `LoadPackageParam.modulePath` 在 api-82 里不存在 → 改用 `CodeSource` 定位模块 APK
-- R8 会把 `XposedEntry`/`NativeBridge` 剥光 → 需要 `proguard-rules.pro` keep
-- JDK 27 下 AGP 的 `JdkImageTransform` 必失败 → 用 JDK 21
+```sh
+git clone https://github.com/SimonQvQ/ak-loader.git
+cd ak-loader
+export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
+bash scripts/build-waydroid.sh
+```
 
-## v0.2.0 — 战斗功能扩展
+产物为 `build/zoot-waydroid-x64.apk`。安装 ABI 为 x86_64，ARM64 执行端位于 `assets/akl/libakl_guest.so`，运行时仍需要系统 ARM 翻译层。构建会下载固定提交的 BNM / Dobby 及编译期 Xposed API。
 
-在倍速之外按 il2cpp 类名/方法名运行时挂钩（不依赖任何偏移，不引用原模块二进制）：
+```sh
+flutter pub get
+flutter analyze
+bash scripts/test-translated-engine.sh
+```
 
-| 功能 | 目标 | 做法 |
-|---|---|---|
-| 倍速 | `UnityEngine.Time.set_timeScale` | 实参乘系数 |
-| 无限部署费用 | `BattleController.SetCost(int,int)` | 两参覆写为 9999 |
-| 生命不减 | `BattleController.ModifyLifePoint(int,obj,int,bool)` | 负值钳到 0 |
-| 敌人停滞 | `BattleEnemy.MoveByRoute(float,bool*)` | 速度置 0 |
-| 强制胜利 | `BattleController.get_gameResult()` | 先跑原逻辑，返回 3 |
-| 一键通关 | `BattleController.get_instance()` + `FinishGame(int,bool,obj)` | 后台线程每 2s 轮询，进战斗就 `il2cpp_runtime_invoke` 结算成 3 星 |
+主机测试使用 ASAN / UBSAN，覆盖桥接协议、错误处理、已加载 ELF 导出解析和战斗数值策略。ARM64 的 Dobby ADRP 夹具已在独立程序及游戏进程内执行；主机模拟测试不能代替演习。[完整构建、签名与调试说明](docs/BUILDING.md)。
 
-未实现：秒杀（`BattleEntity.Init` 是 8 参混合结构，需要真机确认参义后才能安全改写，
-贸然改会 Crash；要的话给我一次战斗 logcat，我按实测签名补上）。
+## 代码结构
 
-## v0.4.0 — 一键通关 + 改名 zoot
+| 路径 | 内容 |
+| --- | --- |
+| `lib/` | Flutter 控制台 |
+| `android/app/src/main/kotlin/` | 配置读写、LSPosed 入口、游戏启动、JNI 桥 |
+| `android/app/src/main/cpp/waydroid_loader.cpp` | x64 host 与 ART NativeLoader / NativeBridge 连接 |
+| `android/app/src/main/cpp/translated_engine.*` | 跨架构调度与协议 |
+| `android/app/src/main/cpp/loaded_export.*` | 已加载 ELF 导出查找 |
+| `android/app/src/main/cpp/ak_core.cpp` | ARM64 guest、元数据匹配与战斗钩子 |
+| `android/app/src/main/cpp/battle_policy.h` | 纯数值策略，与游戏运行时分离 |
+| `scripts/` | 构建、依赖适配与 APK 检查 |
+| `tests/` | 主机回归测试 |
+| `design/icon/` | ZOOT 图标 SVG、生成器和预览 |
+| `third_party/` | 依赖来源、固定版本与许可证 |
+| `docs/` | 架构、构建、证据及历史实验记录 |
 
-- **一键通关**：不依赖 `get_gameResult` 的被动覆盖，而是在后台线程里主动调用
-  `BattleController.get_instance()` 拿到战斗实例，再用 `il2cpp_runtime_invoke` 调
-  `FinishGame(3, true, null)`，进战斗即结算三星。日志关键字：`[一键通关] 已请求结算（result=3）`；
-  若目标方法的签名不是 `(int, bool, obj)`，会打 `FinishGame 抛异常，参数签名可能不是 ...` 而不是静默失败。
-- 应用名 / 图标 / 模块描述统一改为 **zoot**（自适应图标，深蓝底白色 Z）。
+运行链路为：LSPosed → x64 host → 游戏翻译命名空间 → ARM64 guest → BNM / Dobby。现有 Waydroid / Houdini 已能完成这条链路，无需为本模块更换转译层或改系统镜像。
 
-## v0.3.0 — 攻击/伤害倍率
+## 开发文档
 
-原版 mrfz 适配库里**没有**攻击力功能（只有 8 个导出 hook：Init/SetCost/ModifyLifePoint/MoveByRoute/StartGame/FinishGame/get_gameResult/set_timeScale）。本版新增的是我自己加的：
+- [架构](docs/ARCHITECTURE.md) · [构建](docs/BUILDING.md) · [参与开发](CONTRIBUTING.md) · [更新记录](CHANGELOG.md)
+- [当前游戏布局与数值证据](docs/current-game-native-evidence.md) · [一键结算实现](docs/one-click-implementation.md)
+- [原模块静态参考](docs/original-native-reference.md) · [MuMu 与 Waydroid 的加载路径结论](docs/mumu-compatibility.md)
+- [Waydroid 历史实验](docs/waydroid.md) · [x86_64 历史方案](docs/x86_64.md)
 
-`BattleEntity.Init` 返回后遍历该实例的字段，字段名含 `atk`/`attack`/`damage`/`dmg`
-且类型为 I4 / I8 / R4 的，直接乘倍率（UI 1.0×–20.0×）。
-`il2cpp_class_get_fields` + `il2cpp_field_get_offset` 全运行时解析，无硬编码偏移。
+## 许可证与依赖
+
+项目按 [GPL-3.0](LICENSE) 开源。BNM、Dobby 的固定提交、修改位置和上游许可证见 [third_party/README.md](third_party/README.md)；对应许可证也随 APK 分发。Flutter / Dart 依赖锁定在 `pubspec.lock`。
+
+仓库开放本项目全部实现与适配脚本。依赖源码由固定提交获取，生成的 APK、密钥、设备数据及游戏 / 原模块二进制不进入源码仓库；分析记录保留其来源、摘要与验证边界。
